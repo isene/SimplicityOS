@@ -39,9 +39,14 @@ make debug
 
 ## Current Status
 
-**Stage 0:** Project setup and planning
+**Stage 0 Complete!** ✓
 
-See PLAN.md for detailed roadmap.
+- Bootable OS in 32-bit protected mode
+- VGA text output working
+- Arithmetic test: 2+3=5, 5*7=35
+- 250 bytes of stage2 code
+
+See CHANGELOG.md for details.
 
 ## Documentation
 

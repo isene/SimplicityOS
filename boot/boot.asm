@@ -20,7 +20,7 @@ start:
     ; Load stage2 from disk
     ; Stage2 starts at sector 2 (sector 1 is boot sector)
     mov ah, 0x02        ; BIOS read sectors
-    mov al, 16          ; Read 16 sectors (8KB for stage2)
+    mov al, 63          ; Read 63 sectors (max for single BIOS call)
     mov ch, 0           ; Cylinder 0
     mov cl, 2           ; Start at sector 2
     mov dh, 0           ; Head 0
