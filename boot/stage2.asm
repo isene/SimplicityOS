@@ -175,6 +175,45 @@ MULT:
     push rax
     jmp NEXT
 
+MINUS:
+    pop rax
+    sub [rsp], rax
+    jmp NEXT
+
+DIV:
+    xor rdx, rdx
+    pop rbx             ; divisor
+    pop rax             ; dividend
+    div rbx
+    push rax            ; quotient
+    jmp NEXT
+
+ROT:
+    pop rax             ; c
+    pop rbx             ; b
+    pop rcx             ; a
+    push rbx            ; b
+    push rax            ; c
+    push rcx            ; a
+    jmp NEXT
+
+OVER:
+    mov rax, [rsp+8]
+    push rax
+    jmp NEXT
+
+FETCH:
+    pop rax
+    mov rax, [rax]
+    push rax
+    jmp NEXT
+
+STORE:
+    pop rax             ; address
+    pop rbx             ; value
+    mov [rax], rbx
+    jmp NEXT
+
 DOT:
     pop rax
     call print_number
@@ -183,6 +222,11 @@ DOT:
     mov byte [rbx+1], 0x0F
     add rbx, 2
     mov [cursor], rbx
+    jmp NEXT
+
+QUOTE:
+    pop rax             ; Get string address
+    call print_string
     jmp NEXT
 
 LIT:
@@ -244,17 +288,40 @@ emit_char:
     pop rax
     ret
 
-; Test program: 2 3 + . 5 7 * . BYE
+; Print null-terminated string from RAX
+print_string:
+    push rax
+    push rbx
+    push rcx
+    mov rbx, [cursor]
+    mov rcx, rax        ; Use RCX for string pointer
+.loop:
+    mov al, [rcx]
+    cmp al, 0           ; Explicit zero comparison
+    je .done
+    mov [rbx], al
+    mov byte [rbx+1], 0x0E
+    add rbx, 2
+    inc rcx
+    jmp .loop
+.done:
+    mov [cursor], rbx
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+; Test program: Just string, then numbers
 test_program:
+    dq LIT, str_result
+    dq QUOTE        ; prints "Test"
     dq LIT, 2
     dq LIT, 3
     dq PLUS
     dq DOT
-    dq LIT, 5
-    dq LIT, 7
-    dq MULT
-    dq DOT
     dq BYE
+
+str_result: db 'Test', 0
 
 cursor: dq 0xB8000 + 160
 
