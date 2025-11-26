@@ -1041,6 +1041,10 @@ lookup_word:
     je .found_colon
     cmp al, ';'
     je .found_semi
+    cmp al, '@'
+    je .found_fetch
+    cmp al, '!'
+    je .found_store
 
     jmp .check_multi
 
@@ -1064,6 +1068,12 @@ lookup_word:
     jmp .done
 .found_semi:
     mov rax, word_semi
+    jmp .done
+.found_fetch:
+    mov rax, word_fetch
+    jmp .done
+.found_store:
+    mov rax, word_store
     jmp .done
 
 .check_multi:
@@ -1171,18 +1181,36 @@ lookup_word:
 
 .try_words:
     cmp rcx, 5
-    jne .not_found
+    jne .try_forget
     cmp byte [rdi], 'w'
+    jne .try_forget
+    cmp byte [rdi+1], 'o'
+    jne .try_forget
+    cmp byte [rdi+2], 'r'
+    jne .try_forget
+    cmp byte [rdi+3], 'd'
+    jne .try_forget
+    cmp byte [rdi+4], 's'
+    jne .try_forget
+    mov rax, word_words
+    jmp .done
+
+.try_forget:
+    cmp rcx, 6
+    jne .not_found
+    cmp byte [rdi], 'f'
     jne .not_found
     cmp byte [rdi+1], 'o'
     jne .not_found
     cmp byte [rdi+2], 'r'
     jne .not_found
-    cmp byte [rdi+3], 'd'
+    cmp byte [rdi+3], 'g'
     jne .not_found
-    cmp byte [rdi+4], 's'
+    cmp byte [rdi+4], 'e'
     jne .not_found
-    mov rax, word_words
+    cmp byte [rdi+5], 't'
+    jne .not_found
+    mov rax, word_forget
     jmp .done
 
 .not_found:
@@ -1330,19 +1358,39 @@ word_cr:
     call newline
     ret
 
+word_fetch:
+    sub r15, 8
+    mov rax, [r15]          ; Pop address
+    mov rax, [rax]          ; Fetch value at address
+    mov [r15], rax          ; Push value
+    add r15, 8
+    ret
+
+word_store:
+    sub r15, 8
+    mov rax, [r15]          ; Pop address
+    sub r15, 8
+    mov rbx, [r15]          ; Pop value
+    mov [rax], rbx          ; Store value at address
+    ret
+
 word_words:
-    ; List all dictionary words
+    ; List all dictionary words (traverse linked list)
     push rax
     push rbx
     push rcx
     push rsi
 
-    mov rsi, dictionary_space
-.loop:
-    cmp rsi, [dict_here]
-    jge .done
+    mov rsi, [dict_latest]
+    test rsi, rsi
+    jz .done
 
-    ; Skip link
+.loop:
+    ; Save link for next iteration
+    mov rax, [rsi]
+    push rax
+
+    ; Skip link pointer
     add rsi, 8
 
     ; Get name length
@@ -1350,24 +1398,42 @@ word_words:
     inc rsi
 
     ; Print name
-    mov rbx, rsi
-.print_name:
-    mov al, [rbx]
+.print_char:
+    mov al, [rsi]
     call emit_char
-    inc rbx
+    inc rsi
     dec rcx
-    jnz .print_name
+    jnz .print_char
 
     mov al, ' '
     call emit_char
 
-    ; Skip to next (simplified - just stop for now)
-    jmp .done
+    ; Get next entry (from saved link)
+    pop rax
+    mov rsi, rax
+    test rsi, rsi
+    jnz .loop
 
 .done:
     pop rsi
     pop rcx
     pop rbx
+    pop rax
+    ret
+
+word_forget:
+    ; Simplified FORGET - just removes latest word
+    ; TODO: Parse name and find specific word
+    push rax
+    mov rax, [dict_latest]
+    test rax, rax
+    jz .done
+
+    ; Get link from latest entry (points to previous)
+    mov rax, [rax]
+    mov [dict_latest], rax
+
+.done:
     pop rax
     ret
 
