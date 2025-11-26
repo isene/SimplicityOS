@@ -1,0 +1,77 @@
+<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark background -->
+  <rect width="200" height="200" fill="#0a0e27"/>
+
+  <!-- Title -->
+  <text x="100" y="25" font-family="monospace" font-size="14" fill="#00d9ff" text-anchor="middle" font-weight="bold">
+    SIMPLICITY
+  </text>
+  <text x="100" y="40" font-family="monospace" font-size="10" fill="#888" text-anchor="middle">
+    OS
+  </text>
+
+  <!-- Stack visualization - Lego blocks building up -->
+  <!-- Bottom block - Foundation (CPU) -->
+  <rect x="60" y="150" width="80" height="20" fill="#2a9d8f" stroke="#00d9ff" stroke-width="2" rx="2"/>
+  <text x="100" y="164" font-family="monospace" font-size="10" fill="#fff" text-anchor="middle">CPU</text>
+
+  <!-- Second block - Forth (pulses) -->
+  <g>
+    <rect x="60" y="120" width="80" height="20" fill="#e76f51" stroke="#00d9ff" stroke-width="2" rx="2">
+      <animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite"/>
+    </rect>
+    <text x="100" y="134" font-family="monospace" font-size="10" fill="#fff" text-anchor="middle">
+      FORTH
+    </text>
+  </g>
+
+  <!-- Third block - Words (appears after delay) -->
+  <g>
+    <rect x="60" y="90" width="80" height="20" fill="#f4a261" stroke="#00d9ff" stroke-width="2" rx="2">
+      <animate attributeName="opacity" values="0;0;1;1" dur="4s" repeatCount="indefinite"/>
+    </rect>
+    <text x="100" y="104" font-family="monospace" font-size="10" fill="#fff" text-anchor="middle">
+      <animate attributeName="opacity" values="0;0;1;1" dur="4s" repeatCount="indefinite"/>
+      WORDS
+    </text>
+  </g>
+
+  <!-- Top block - You (appears last) -->
+  <g>
+    <rect x="60" y="60" width="80" height="20" fill="#e9c46a" stroke="#00d9ff" stroke-width="2" rx="2">
+      <animate attributeName="opacity" values="0;0;0;0;1;1" dur="6s" repeatCount="indefinite"/>
+    </rect>
+    <text x="100" y="74" font-family="monospace" font-size="10" fill="#000" text-anchor="middle">
+      <animate attributeName="opacity" values="0;0;0;0;1;1" dur="6s" repeatCount="indefinite"/>
+      YOU
+    </text>
+  </g>
+
+  <!-- Forth stack representation - side bars -->
+  <line x1="25" y1="60" x2="25" y2="170" stroke="#00d9ff" stroke-width="2" opacity="0.3"/>
+  <line x1="175" y1="60" x2="175" y2="170" stroke="#00d9ff" stroke-width="2" opacity="0.3"/>
+
+  <!-- Bottom indicators - 16→32→64 bit -->
+  <g opacity="0.5">
+    <text x="30" y="190" font-family="monospace" font-size="8" fill="#00d9ff">16</text>
+    <text x="90" y="190" font-family="monospace" font-size="8" fill="#00d9ff">32</text>
+    <text x="155" y="190" font-family="monospace" font-size="8" fill="#00d9ff">64</text>
+
+    <!-- Arrows showing progression -->
+    <path d="M 40 186 L 48 186" stroke="#00d9ff" stroke-width="1" marker-end="url(#arrowhead)"/>
+    <path d="M 100 186 L 108 186" stroke="#00d9ff" stroke-width="1" marker-end="url(#arrowhead)"/>
+    <path d="M 165 186 L 173 186" stroke="#00d9ff" stroke-width="1" marker-end="url(#arrowhead)"/>
+  </g>
+
+  <!-- Arrow marker definition -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 6 3, 0 6" fill="#00d9ff"/>
+    </marker>
+  </defs>
+
+  <!-- Blinking cursor effect -->
+  <rect x="145" y="62" width="8" height="2" fill="#00ff00">
+    <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+  </rect>
+</svg>

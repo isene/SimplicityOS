@@ -1,9 +1,21 @@
+<div align="center">
+
+[![](img/simplicity_logo.svg)](img/simplicity_logo.svg)
+
 # Simplicity OS
+
+[![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
+[![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
+[![Version](https://img.shields.io/badge/version-0.3.0-brightgreen.svg)](CHANGELOG.md)
+[![Size](https://img.shields.io/badge/size-1.3KB-red.svg)](#)
 
 Bare-metal x86_64 operating system built on Forth principles.
 
 **Blog post**: [Building a 64-bit OS from Scratch with Claude Code](https://isene.org/2025/11/SimplicityOS.html)
 **Development narrative**: [MakingAnOS.md](MakingAnOS.md) - Complete session transcript
+
+</div>
 
 ## Philosophy
 
