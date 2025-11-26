@@ -2,6 +2,9 @@
 
 Bare-metal x86_64 operating system built on Forth principles.
 
+**Blog post**: [Building a 64-bit OS from Scratch with Claude Code](https://isene.org/2025/11/SimplicityOS.html)
+**Development narrative**: [MakingAnOS.md](MakingAnOS.md) - Complete session transcript
+
 ## Philosophy
 
 Everything is a WORD. Hardware is directly composable via stack-based interface.
