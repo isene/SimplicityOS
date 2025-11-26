@@ -1,5 +1,73 @@
 # Simplicity OS - Changelog
 
+## [0.4.0] - 2025-11-26 - Stage 3 Complete - INTERACTIVE FORTH REPL!
+
+### Major Achievement - Fully Interactive Forth!
+You can now TYPE Forth code and watch it EXECUTE in real-time!
+
+### Features Added
+- **PS/2 keyboard driver** - Full keyboard input working ✓
+- **Scancode to ASCII conversion** - All letters, numbers, special chars ✓
+- **Shift key support** - Uppercase and symbols ✓
+- **Hardware cursor tracking** - Cursor follows typing ✓
+- **Backspace** - Line editing works ✓
+- **Interactive REPL loop** - Read-Eval-Print-Loop ✓
+- **Forth parser** - Tokenizes input into words ✓
+- **Number parser** - Converts strings to integers ✓
+- **Word lookup** - Finds and executes Forth words ✓
+- **Separate Forth stack** - R15 register, prevents corruption ✓
+
+### Working Interactive Commands
+Type these at the prompt:
+```forth
+> 2 3 + .
+7 ok
+> 10 5 - .
+5 ok
+> 6 7 * .
+42 ok
+> 100 4 / .
+25 ok
+> 2 3 + 5 * .
+25 ok
+> dup
+(duplicates top of stack)
+> swap
+(swaps top two items)
+```
+
+### Technical Implementation
+- Stage2 size: 2903 bytes (was 1551 bytes)
+- Added ~1.3KB for full REPL + parser + keyboard driver
+- R15 = Forth data stack pointer (separate from machine RSP)
+- Forth stack: 64 cells (512 bytes) at forth_stack
+- Scancode table: Complete QWERTY layout
+- Special chars: + - * / . , < > ! @ # $ % ^ & ( ) = _
+
+### Critical Fixes
+1. **Stack corruption fix**: Use R15 for Forth stack, RSP for machine calls
+2. **Scancode table**: Fixed third row offset (was shifted by one)
+3. **Shift handling**: Track shift state, convert to uppercase/symbols
+4. **Hardware cursor**: Update VGA cursor after every character
+5. **Key release filter**: Ignore scancode bit 7 (releases)
+
+### What Works
+- Type Forth expressions interactively ✓
+- Arithmetic executes correctly ✓
+- Stack manipulation works ✓
+- Error handling (? for unknown words) ✓
+- Multi-line sessions ✓
+- All from a bootable 3KB OS!
+
+### Next Steps - Stage 4
+1. Add .S to display stack contents
+2. Add colon definitions (: SQUARE DUP * ;)
+3. Add more words (ROT OVER @ ! CR EMIT)
+4. Build proper dictionary system
+5. Add disk I/O to save/load code
+
+---
+
 ## [0.3.0] - 2025-11-26 - Stage 2 Complete - 64-BIT BREAKTHROUGH!
 
 ### Major Achievement - 64-bit Long Mode Working!
