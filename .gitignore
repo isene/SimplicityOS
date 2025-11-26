@@ -1,0 +1,16 @@
+# Build artifacts
+*.bin
+*.o
+*.img
+*.iso
+*.elf
+
+# Temporary files
+*~
+*.swp
+*.swo
+.DS_Store
+
+# Debug files
+*.log
+*.dump
