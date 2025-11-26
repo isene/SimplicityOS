@@ -54,17 +54,31 @@ make debug
 
 ## Current Status
 
-**Stage 3 Complete!** ✓ - INTERACTIVE FORTH REPL!
+**Stage 4 Complete** - Colon Definitions
 
-- **Fully interactive Forth shell** - Type code and watch it execute! ✓
-- PS/2 keyboard with full shift support ✓
-- Complete REPL: Read-Eval-Print-Loop ✓
-- Forth parser and executor ✓
-- **15 working words**: + - * / . .s dup drop swap rot over emit cr
-- Stack persists across lines ✓
-- Case-insensitive ✓
-- Type: `5 dup * .` → prints "25 ok"
-- 3271 bytes total (3.2KB!)
+- Fully interactive Forth shell - Type code and watch it execute
+- PS/2 keyboard with full shift support
+- Complete REPL: Read-Eval-Print-Loop
+- **Colon definitions** - Define new words interactively
+- Dictionary with linked list - Multiple definitions persist
+- **15 built-in words**: + - * / . .s dup drop swap rot over emit cr
+- Stack persists across lines
+- Case-insensitive
+- 10.3KB total
+
+**Example session:**
+```forth
+> : square dup * ;
+ok
+> : double 2 * ;
+ok
+> : triple 3 * ;
+ok
+> 2 triple double square .
+144 ok
+```
+
+The language builds itself from user-defined words.
 
 See CHANGELOG.md for complete feature list.
 

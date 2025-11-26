@@ -375,11 +375,21 @@ scancode_to_ascii:
 .check_slash:
     ; Slash (scancode 0x35)
     cmp rbx, 0x35
-    jne .letters
+    jne .check_semicolon
     mov rax, '/'
     cmp byte [shift_state], 0
     je .done
     mov rax, '?'
+    jmp .done
+
+.check_semicolon:
+    ; Semicolon/colon (scancode 0x27)
+    cmp rbx, 0x27
+    jne .letters
+    mov rax, ';'
+    cmp byte [shift_state], 0
+    je .done
+    mov rax, ':'
     jmp .done
 
 .letters:
@@ -537,6 +547,10 @@ REPL:
     ; Get word
     call parse_word         ; Returns word in RDI, length in RCX
 
+    ; Check if getting name for definition
+    cmp byte [compile_mode], 2
+    je .save_name
+
     ; Check if number
     call is_number
     test rax, rax
@@ -547,14 +561,122 @@ REPL:
     test rax, rax
     jz .unknown_word
 
-    ; Execute word
+    ; Check if it's a dictionary word (has DOCOL code pointer)
+    push rax
+    mov rbx, [rax]
+    cmp rbx, DOCOL
+    pop rax
+    je .dict_word
+
+    ; Built-in word
+.builtin_word:
+    ; Built-in word - RAX is function address
+    ; Check if compiling
+    cmp byte [compile_mode], 0
+    jne .compile_word
+
+    ; Execute built-in word (interpret mode)
     call rax
+    jmp .parse_loop
+
+.dict_word:
+    ; Dictionary word - execute definition
+    cmp byte [compile_mode], 0
+    jne .compile_dictword
+
+    ; Save parse position
+    push rsi
+
+    ; Execute colon definition
+    add rax, 8              ; Skip code pointer to body
+    mov rsi, rax
+.exec_def:
+    lodsq
+    cmp rax, EXIT
+    je .dict_done
+
+    ; Check if it's LIT (from old Forth code)
+    cmp rax, LIT
+    jne .not_lit
+
+    ; It's LIT - next qword is the number
+    lodsq
+    mov [r15], rax
+    add r15, 8
+    jmp .exec_def
+
+.not_lit:
+    ; Regular word - call it
+    call rax
+    jmp .exec_def
+
+.dict_done:
+    ; Restore parse position
+    pop rsi
+    jmp .parse_loop
+
+.compile_dictword:
+    ; When compiling, store the code field address
+    mov rbx, [compile_ptr]
+    mov [rbx], rax
+    add rbx, 8
+    mov [compile_ptr], rbx
+    jmp .parse_loop
+
+.compile_word:
+    ; Special case: ; is IMMEDIATE - executes even in compile mode
+    cmp rax, word_semi
+    je .execute_now
+
+    ; Add built-in word address to compilation buffer
+    mov rbx, [compile_ptr]
+    ; RAX already has function address for built-in words
+    mov [rbx], rax
+    add rbx, 8
+    mov [compile_ptr], rbx
+    jmp .parse_loop
+
+.execute_now:
+    call rax
+    jmp .parse_loop
+
+.save_name:
+    ; Save word as definition name
+    push rsi
+    push rdi
+    push rcx
+    mov rsi, rdi
+    mov rdi, new_word_name
+    rep movsb
+    mov byte [rdi], 0       ; Null terminate
+    pop rcx
+    pop rdi
+    pop rsi
+
+    ; Now enter compile mode
+    mov byte [compile_mode], 1
     jmp .parse_loop
 
 .push_number:
     call parse_number       ; Converts word to number in RAX
+
+    ; Check if compiling
+    cmp byte [compile_mode], 0
+    jne .compile_literal
+
+    ; Interpret mode - push to stack
     mov [r15], rax          ; Push to Forth stack
     add r15, 8
+    jmp .parse_loop
+
+.compile_literal:
+    ; Compile mode - add LIT and number to buffer
+    mov rbx, [compile_ptr]
+    mov qword [rbx], LIT    ; Compile LIT word
+    add rbx, 8
+    mov [rbx], rax          ; Compile the number
+    add rbx, 8
+    mov [compile_ptr], rbx
     jmp .parse_loop
 
 .unknown_word:
@@ -569,6 +691,108 @@ REPL:
     call newline
 
     jmp .main_loop
+
+; DOCOL - Execute a colon definition
+; Entry point for user-defined words
+; Expects definition body to start at address following this
+DOCOL:
+    ; Get address of this call (return address on stack)
+    pop rsi                 ; Return address = start of definition body
+
+    ; Execute each word until EXIT
+.exec_loop:
+    lodsq                   ; Load next word address
+    cmp rax, EXIT
+    je .done
+
+    ; Check if it's LIT
+    cmp rax, LIT
+    jne .not_lit
+    lodsq                   ; Get literal value
+    mov [r15], rax          ; Push to stack
+    add r15, 8
+    jmp .exec_loop
+
+.not_lit:
+    ; Call the word
+    call rax
+    jmp .exec_loop
+
+.done:
+    ret
+
+; EXIT - Just a marker, not executed
+EXIT:
+    ret
+
+; Create dictionary entry for new word
+create_dict_entry:
+    push rax
+    push rbx
+    push rcx
+    push rdi
+    push rsi
+
+    mov rdi, [dict_here]
+    mov r8, rdi             ; Save entry start in R8 (not RAX!)
+
+    ; Store link to previous entry
+    mov rbx, [dict_latest]
+    mov [rdi], rbx
+    add rdi, 8
+
+    ; Store name length
+    mov rsi, new_word_name
+    xor rcx, rcx
+.count:
+    cmp byte [rsi + rcx], 0
+    je .name_done
+    inc rcx
+    jmp .count
+.name_done:
+    mov [rdi], cl
+    inc rdi
+
+    ; Store name
+    mov rsi, new_word_name
+    rep movsb
+
+    ; Align to 8 bytes
+    mov rax, rdi
+    and rax, 7
+    test rax, rax
+    jz .aligned
+    add rdi, 8
+    and rdi, ~7
+.aligned:
+
+    ; Store code pointer (DOCOL)
+    mov qword [rdi], DOCOL
+    add rdi, 8
+
+    ; Copy compiled code from compile_buffer
+    mov rsi, compile_buffer
+    mov rcx, [compile_ptr]
+    sub rcx, compile_buffer
+    shr rcx, 3              ; Divide by 8 (qwords)
+    rep movsq
+
+    ; Store EXIT at end
+    mov qword [rdi], EXIT
+    add rdi, 8
+
+    ; Update dict_here (next free space)
+    mov [dict_here], rdi
+
+    ; Update dict_latest (this entry's start - saved in R8)
+    mov [dict_latest], r8
+
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
 
 ; Helper: Print newline
 newline:
@@ -676,6 +900,93 @@ parse_number:
     pop rbx
     ret
 
+; Search dictionary for word (RDI=name, RCX=length)
+; Returns code address in RAX, or 0 if not found
+search_dictionary:
+    push rbx
+    push rcx
+    push rdi
+    push rsi
+
+    ; Start at latest entry
+    mov rsi, [dict_latest]
+    test rsi, rsi
+    jz .not_found           ; Empty dictionary (dict_latest = 0)
+
+.search_loop:
+    ; RSI points to start of entry (link field)
+
+    ; Save link for later
+    mov r8, [rsi]           ; R8 = link to previous entry
+
+    ; Skip link pointer
+    add rsi, 8
+
+    ; Check name length
+    movzx rbx, byte [rsi]
+    inc rsi
+    cmp rbx, rcx
+    jne .next_entry
+
+    ; Compare names character by character
+    push rsi
+    push rdi
+    push rcx
+.cmp_loop:
+    mov al, [rdi]
+    mov bl, [rsi]
+    cmp al, bl
+    jne .name_mismatch
+    inc rdi
+    inc rsi
+    dec rcx
+    jnz .cmp_loop
+
+    ; Match! RSI now points right after name
+    pop rcx
+    pop rdi
+    pop rsi
+
+    ; Skip name bytes
+    add rsi, rcx
+
+    ; Align to 8 bytes to find code pointer
+    mov rax, rsi
+    and rax, 7
+    test rax, rax
+    jz .already_aligned
+    add rsi, 8
+    and rsi, ~7
+.already_aligned:
+
+    ; Return address of code field
+    mov rax, rsi
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rbx
+    ret
+
+.name_mismatch:
+    pop rcx
+    pop rdi
+    pop rsi
+
+.next_entry:
+    ; Follow link to previous entry
+    mov rsi, r8             ; R8 has the link we saved earlier
+    test rsi, rsi
+    jz .not_found           ; No more entries (link = 0)
+    jmp .search_loop
+
+.not_found:
+    xor rax, rax
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rbx
+    ret
+
 ; Lookup word, return address in RAX (0 if not found)
 lookup_word:
     push rbx
@@ -701,6 +1012,16 @@ lookup_word:
     pop rcx
     pop rdi
 
+    ; Search dictionary first
+    call search_dictionary
+    test rax, rax
+    jz .not_in_dict
+
+    ; Found in dictionary - return it
+    jmp .done
+
+.not_in_dict:
+
     ; Check single-char operators first
     cmp rcx, 1
     jne .check_multi
@@ -716,6 +1037,10 @@ lookup_word:
     je .found_div
     cmp al, '.'
     je .found_dot
+    cmp al, ':'
+    je .found_colon
+    cmp al, ';'
+    je .found_semi
 
     jmp .check_multi
 
@@ -733,6 +1058,12 @@ lookup_word:
     jmp .done
 .found_dot:
     mov rax, word_dot
+    jmp .done
+.found_colon:
+    mov rax, word_colon
+    jmp .done
+.found_semi:
+    mov rax, word_semi
     jmp .done
 
 .check_multi:
@@ -830,12 +1161,28 @@ lookup_word:
 
 .try_cr:
     cmp rcx, 2
-    jne .not_found
+    jne .try_words
     cmp byte [rdi], 'c'
-    jne .not_found
+    jne .try_words
     cmp byte [rdi+1], 'r'
-    jne .not_found
+    jne .try_words
     mov rax, word_cr
+    jmp .done
+
+.try_words:
+    cmp rcx, 5
+    jne .not_found
+    cmp byte [rdi], 'w'
+    jne .not_found
+    cmp byte [rdi+1], 'o'
+    jne .not_found
+    cmp byte [rdi+2], 'r'
+    jne .not_found
+    cmp byte [rdi+3], 'd'
+    jne .not_found
+    cmp byte [rdi+4], 's'
+    jne .not_found
+    mov rax, word_words
     jmp .done
 
 .not_found:
@@ -983,6 +1330,64 @@ word_cr:
     call newline
     ret
 
+word_words:
+    ; List all dictionary words
+    push rax
+    push rbx
+    push rcx
+    push rsi
+
+    mov rsi, dictionary_space
+.loop:
+    cmp rsi, [dict_here]
+    jge .done
+
+    ; Skip link
+    add rsi, 8
+
+    ; Get name length
+    movzx rcx, byte [rsi]
+    inc rsi
+
+    ; Print name
+    mov rbx, rsi
+.print_name:
+    mov al, [rbx]
+    call emit_char
+    inc rbx
+    dec rcx
+    jnz .print_name
+
+    mov al, ' '
+    call emit_char
+
+    ; Skip to next (simplified - just stop for now)
+    jmp .done
+
+.done:
+    pop rsi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+word_colon:
+    ; Set mode to get name next
+    mov byte [compile_mode], 2
+
+    ; Reset compilation buffer
+    mov rax, compile_buffer
+    mov [compile_ptr], rax
+    ret
+
+word_semi:
+    ; End compilation mode
+    mov byte [compile_mode], 0
+
+    ; Create dictionary entry
+    call create_dict_entry
+    ret
+
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
@@ -991,8 +1396,17 @@ str_unknown: db ' ?', 0
 input_buffer: times 80 db 0
 shift_state: db 0
 forth_stack: times 64 dq 0      ; Forth data stack (64 cells)
+compile_mode: db 0              ; 0 = interpret, 1 = compile
+dict_here: dq dictionary_space  ; Next free space in dictionary
+dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)
+compile_buffer: times 256 dq 0  ; Compilation buffer
+compile_ptr: dq compile_buffer  ; Current compilation position
+new_word_name: times 32 db 0    ; Name of word being defined
 
 cursor: dq 0xB8000 + 160
+
+; Dictionary space (4KB for user-defined words)
+dictionary_space: times 4096 db 0
 
 ; GDT - 32-bit for now (we'll stay in compatibility mode)
 align 8

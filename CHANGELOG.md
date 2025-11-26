@@ -1,6 +1,66 @@
 # Simplicity OS - Changelog
 
-## [0.4.0] - 2025-11-26 - Stage 3 Complete - INTERACTIVE FORTH REPL!
+## [0.5.0] - 2025-11-26 - Stage 4 Complete - Colon Definitions
+
+### Major Feature - Define New Words Interactively
+Implemented full colon definition support with linked list dictionary.
+
+### Features Added
+- **Colon definitions** - Create new Forth words with `: name ... ;`
+- **Dictionary system** - Linked list of user-defined words
+- **DOCOL execution** - Proper execution of defined words
+- **Compilation mode** - Collect words during definition
+- **Immediate words** - Semicolon executes even in compile mode
+- **Multi-word definitions** - Define words using other defined words
+- **Literal support** - Numbers in definitions work correctly
+
+### Working Examples
+```forth
+> : square dup * ;
+ok
+> : double 2 * ;
+ok
+> : triple 3 * ;
+ok
+> 2 triple double square .
+144 ok (2×3×2, then squared = 144)
+> : quad double double ;
+ok (defining using other definitions)
+```
+
+### Technical Implementation
+- Stage2 size: 10303 bytes (split into boot/ and kernel/)
+- Dictionary: 4KB space with proper linked list
+- dict_latest: Points to most recent entry
+- dict_here: Points to next free space
+- Search: Backwards from latest, following links
+- Entry structure: Link(8) + Length(1) + Name(N) + CodePtr(8) + Body + EXIT
+
+### Architecture Refactoring
+- Separated bootloader and kernel using %include
+- boot/stage2.asm: 109 lines - Bootloader only
+- kernel/simplicity.asm: 1400+ lines - Complete OS
+- Clean separation of concerns
+
+### Critical Fixes
+1. **Register preservation**: Use R8 for entry start, not RAX
+2. **Immediate semicolon**: ; executes in compile mode
+3. **LIT handling**: Proper literal execution in definitions
+4. **Linked list**: Proper prev-pointer chain
+5. **DOCOL compatibility**: Works with REPL function call model
+6. **RSI preservation**: Save/restore parse position during execution
+
+### What Works
+- Define unlimited new words
+- Words with literals (numbers)
+- Words calling other defined words
+- Chain multiple operations
+- Dictionary persists across sessions
+- Newest definitions shadow older ones
+
+---
+
+## [0.4.0] - 2025-11-26 - Stage 3 Complete - Interactive Forth REPL
 
 ### Major Achievement - Fully Interactive Forth!
 You can now TYPE Forth code and watch it EXECUTE in real-time!
