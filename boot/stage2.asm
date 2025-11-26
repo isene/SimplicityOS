@@ -583,6 +583,9 @@ REPL:
     call print_string
     call newline
 
+    ; Initialize Forth stack once
+    mov r15, forth_stack
+
 .main_loop:
     ; Print prompt
     mov rax, str_prompt
@@ -632,7 +635,7 @@ REPL:
 
     ; Parse and execute the line
     mov rsi, input_buffer   ; RSI = parse pointer
-    mov r15, forth_stack    ; R15 = Forth data stack pointer
+    ; R15 already points to Forth stack (don't reset!)
 
 .parse_loop:
     ; Skip leading spaces
@@ -789,6 +792,24 @@ lookup_word:
     push rdi
     push rsi
 
+    ; Convert word to lowercase for case-insensitive matching
+    push rdi
+    push rcx
+    mov rbx, rdi
+.lower_loop:
+    mov al, [rbx]
+    cmp al, 'A'
+    jl .next_char
+    cmp al, 'Z'
+    jg .next_char
+    add byte [rbx], 32      ; Convert to lowercase
+.next_char:
+    inc rbx
+    dec rcx
+    jnz .lower_loop
+    pop rcx
+    pop rdi
+
     ; Check single-char operators first
     cmp rcx, 1
     jne .check_multi
@@ -805,7 +826,7 @@ lookup_word:
     cmp al, '.'
     je .found_dot
 
-    jmp .not_found
+    jmp .check_multi
 
 .found_plus:
     mov rax, word_plus
@@ -825,6 +846,17 @@ lookup_word:
 
 .check_multi:
     ; Check multi-char words
+    ; .S (stack display)
+    cmp rcx, 2
+    jne .try_dup
+    cmp byte [rdi], '.'
+    jne .try_dup
+    cmp byte [rdi+1], 's'
+    jne .try_dup
+    mov rax, word_dots
+    jmp .done
+
+.try_dup:
     ; DUP
     cmp rcx, 3
     jne .try_drop
@@ -853,16 +885,66 @@ lookup_word:
 
 .try_swap:
     cmp rcx, 4
-    jne .not_found
+    jne .try_over
     cmp byte [rdi], 's'
-    jne .not_found
+    jne .try_over
     cmp byte [rdi+1], 'w'
-    jne .not_found
+    jne .try_over
     cmp byte [rdi+2], 'a'
-    jne .not_found
+    jne .try_over
     cmp byte [rdi+3], 'p'
-    jne .not_found
+    jne .try_over
     mov rax, word_swap
+    jmp .done
+
+.try_over:
+    cmp rcx, 4
+    jne .try_emit
+    cmp byte [rdi], 'o'
+    jne .try_emit
+    cmp byte [rdi+1], 'v'
+    jne .try_emit
+    cmp byte [rdi+2], 'e'
+    jne .try_emit
+    cmp byte [rdi+3], 'r'
+    jne .try_emit
+    mov rax, word_over
+    jmp .done
+
+.try_emit:
+    cmp rcx, 4
+    jne .try_rot
+    cmp byte [rdi], 'e'
+    jne .try_rot
+    cmp byte [rdi+1], 'm'
+    jne .try_rot
+    cmp byte [rdi+2], 'i'
+    jne .try_rot
+    cmp byte [rdi+3], 't'
+    jne .try_rot
+    mov rax, word_emit
+    jmp .done
+
+.try_rot:
+    cmp rcx, 3
+    jne .try_cr
+    cmp byte [rdi], 'r'
+    jne .try_cr
+    cmp byte [rdi+1], 'o'
+    jne .try_cr
+    cmp byte [rdi+2], 't'
+    jne .try_cr
+    mov rax, word_rot
+    jmp .done
+
+.try_cr:
+    cmp rcx, 2
+    jne .not_found
+    cmp byte [rdi], 'c'
+    jne .not_found
+    cmp byte [rdi+1], 'r'
+    jne .not_found
+    mov rax, word_cr
     jmp .done
 
 .not_found:
@@ -925,6 +1007,49 @@ word_dot:
     call update_hw_cursor
     ret
 
+word_dots:
+    ; Display stack: <depth> item1 item2 ...
+    push rax
+    push rbx
+    push rcx
+    push rdi
+
+    ; Calculate depth
+    mov rax, r15
+    sub rax, forth_stack
+    shr rax, 3              ; Divide by 8
+    mov rcx, rax            ; Save depth
+
+    ; Print <depth>
+    mov al, '<'
+    call emit_char
+    mov rax, rcx
+    call print_number
+    mov al, '>'
+    call emit_char
+    mov al, ' '
+    call emit_char
+
+    ; Print each stack item
+    test rcx, rcx
+    jz .done
+    mov rdi, forth_stack
+.loop:
+    mov rax, [rdi]
+    call print_number
+    mov al, ' '
+    call emit_char
+    add rdi, 8
+    dec rcx
+    jnz .loop
+
+.done:
+    pop rdi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
 word_dup:
     mov rax, [r15-8]        ; Get TOS
     mov [r15], rax          ; Push copy
@@ -940,6 +1065,31 @@ word_swap:
     mov rbx, [r15-16]       ; Get second
     mov [r15-8], rbx        ; Swap
     mov [r15-16], rax
+    ret
+
+word_rot:
+    mov rax, [r15-8]        ; c (TOS)
+    mov rbx, [r15-16]       ; b
+    mov rcx, [r15-24]       ; a
+    mov [r15-8], rcx        ; a on top
+    mov [r15-16], rax       ; c in middle
+    mov [r15-24], rbx       ; b at bottom
+    ret
+
+word_over:
+    mov rax, [r15-16]       ; Get second item
+    mov [r15], rax          ; Push copy
+    add r15, 8
+    ret
+
+word_emit:
+    sub r15, 8
+    mov rax, [r15]          ; Pop character
+    call emit_char
+    ret
+
+word_cr:
+    call newline
     ret
 
 str_banner: db 'Simplicity Forth REPL v0.3', 0

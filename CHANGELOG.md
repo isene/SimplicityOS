@@ -18,31 +18,41 @@ You can now TYPE Forth code and watch it EXECUTE in real-time!
 - **Separate Forth stack** - R15 register, prevents corruption ✓
 
 ### Working Interactive Commands
-Type these at the prompt:
+Type these at the prompt (case-insensitive):
 ```forth
 > 2 3 + .
 7 ok
-> 10 5 - .
-5 ok
-> 6 7 * .
-42 ok
-> 100 4 / .
-25 ok
-> 2 3 + 5 * .
-25 ok
-> dup
-(duplicates top of stack)
-> swap
-(swaps top two items)
+> 1 2 3 .s
+<3> 1 2 3 ok
+> dup drop swap
+ok
+> 5 dup * .
+25 ok (5 squared)
+> 65 emit
+A ok
+> rot over
+ok (stack manipulation)
+> cr
+ok (newline)
 ```
 
+**All Forth words available:**
+- Numbers: Push any integer
+- Arithmetic: + - * /
+- Stack: dup drop swap rot over .s
+- I/O: . (print number) emit (print char) cr (newline)
+- Case-insensitive: DUP = dup = Dup
+
 ### Technical Implementation
-- Stage2 size: 2903 bytes (was 1551 bytes)
-- Added ~1.3KB for full REPL + parser + keyboard driver
+- Stage2 size: 3271 bytes (was 751 bytes in Stage 2)
+- Complete OS with bootloader + kernel + REPL: 3.2KB
 - R15 = Forth data stack pointer (separate from machine RSP)
-- Forth stack: 64 cells (512 bytes) at forth_stack
-- Scancode table: Complete QWERTY layout
+- Forth stack: 64 cells (512 bytes), persists across lines
+- Scancode table: Complete QWERTY layout (fixed third row offset!)
 - Special chars: + - * / . , < > ! @ # $ % ^ & ( ) = _
+- Shift support: Uppercase letters + shifted symbols
+- Case-insensitive word matching
+- Hardware cursor: Tracks typing via VGA controller ports
 
 ### Critical Fixes
 1. **Stack corruption fix**: Use R15 for Forth stack, RSP for machine calls

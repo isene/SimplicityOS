@@ -57,12 +57,14 @@ make debug
 **Stage 3 Complete!** ✓ - INTERACTIVE FORTH REPL!
 
 - **Fully interactive Forth shell** - Type code and watch it execute! ✓
-- PS/2 keyboard input with shift support ✓
+- PS/2 keyboard with full shift support ✓
 - Complete REPL: Read-Eval-Print-Loop ✓
 - Forth parser and executor ✓
-- Working words: + - * / . dup drop swap
-- Type: `2 3 + .` → prints "7 ok"
-- 2903 bytes total (under 3KB!)
+- **15 working words**: + - * / . .s dup drop swap rot over emit cr
+- Stack persists across lines ✓
+- Case-insensitive ✓
+- Type: `5 dup * .` → prints "25 ok"
+- 3271 bytes total (3.2KB!)
 
 See CHANGELOG.md for complete feature list.
 
