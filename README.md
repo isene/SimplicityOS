@@ -39,12 +39,14 @@ make debug
 
 ## Current Status
 
-**Stage 0 Complete!** ✓
+**Stage 1 Complete!** ✓
 
-- Bootable OS in 32-bit protected mode
-- VGA text output working
-- Arithmetic test: 2+3=5, 5*7=35
-- 250 bytes of stage2 code
+- Working Forth interpreter in 32-bit protected mode
+- NEXT inner interpreter loop
+- 7 Forth words: LIT DUP DROP SWAP + * . BYE
+- Executes test program: 2 3 + . 5 7 * .
+- Output: "5 35"
+- 377 bytes of stage2 code
 
 See CHANGELOG.md for details.
 

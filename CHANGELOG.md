@@ -1,5 +1,36 @@
 # Simplicity OS - Changelog
 
+## [0.2.0] - 2025-11-26 - Stage 1 Complete
+
+### Added - Working Forth Interpreter!
+- NEXT inner interpreter loop (core of Forth execution model)
+- Forth words implemented: LIT DUP DROP SWAP + * . BYE
+- Stack-based execution working correctly
+- Test program executes: `2 3 + . 5 7 * .` outputs "5 35"
+
+### Technical Details
+- 32-bit protected mode Forth interpreter
+- Data stack at 0x80000, return stack at 0x70000
+- ESI = instruction pointer, ESP = data stack, EBP = return stack
+- Direct threaded code model (addresses of machine code)
+- 377 bytes of stage2 code
+
+### What Works
+- Forth interpreter loop executes correctly ✓
+- LIT pushes literals to stack ✓
+- Arithmetic operations (+ *) work ✓
+- Stack manipulation (DUP DROP SWAP) functional ✓
+- DOT prints numbers in decimal ✓
+- Clean halt with BYE ✓
+
+### Next Steps - Stage 2
+1. Add more Forth words: - / ROT OVER
+2. Add 64-bit long mode support
+3. Implement keyboard input
+4. Build interactive REPL
+
+---
+
 ## [0.1.0] - 2025-11-26 - Stage 0 Complete
 
 ### Added
