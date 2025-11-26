@@ -39,16 +39,17 @@ make debug
 
 ## Current Status
 
-**Stage 1 Complete!** ✓
+**Stage 2 Complete!** ✓ - 64-BIT BREAKTHROUGH!
 
-- Working Forth interpreter in 32-bit protected mode
-- NEXT inner interpreter loop
+- Full 64-bit long mode (x86_64) working!
+- CPU progression: 16-bit → 32-bit → 64-bit ✓
+- 64-bit Forth interpreter with NEXT loop
 - 7 Forth words: LIT DUP DROP SWAP + * . BYE
-- Executes test program: 2 3 + . 5 7 * .
-- Output: "5 35"
-- 377 bytes of stage2 code
+- Executes test: 2 3 + . 5 7 * .
+- Output: "5 35" using 64-bit arithmetic
+- 751 bytes of bootable code
 
-See CHANGELOG.md for details.
+See CHANGELOG.md for breakthrough details.
 
 ## Documentation
 

@@ -1,5 +1,5 @@
-; Simplicity OS - Stage 2 Loader with Forth Interpreter
-; 32-bit protected mode with working Forth
+; Simplicity OS - Stage 2 Loader
+; Test: Enter 64-bit long mode without [BITS 64] code
 
 [BITS 16]
 [ORG 0x7E00]
@@ -50,139 +50,215 @@ prot_mode:
     jmp .loop
 .done:
 
-    ; Initialize Forth
-    mov esp, 0x80000        ; Data stack
-    mov ebp, 0x70000        ; Return stack
-    mov esi, test_program   ; Instruction pointer
+    ; CRITICAL: Clear page table memory first!
+    mov edi, 0x70000
+    xor eax, eax
+    mov ecx, 3072        ; 12KB for 3 pages
+    rep stosd
+
+    ; Build page tables at 0x70000
+    mov dword [0x70000], 0x71003    ; PML4[0] -> PDPT at 0x71000
+    mov dword [0x71000], 0x72003    ; PDPT[0] -> PD at 0x72000
+    mov dword [0x72000], 0x000083   ; PD[0] -> 2MB page
+
+    ; Debug: Print progress markers
+    mov byte [0xB8000 + 160], 'P'   ; Page tables built
+    mov byte [0xB8000 + 161], 0x0C
+
+    ; Set CR3
+    mov eax, 0x70000
+    mov cr3, eax
+
+    mov byte [0xB8000 + 162], 'C'   ; CR3 set
+    mov byte [0xB8000 + 163], 0x0C
+
+    ; Enable PAE
+    mov eax, cr4
+    or eax, 0x20
+    mov cr4, eax
+
+    mov byte [0xB8000 + 164], 'A'   ; PAE enabled
+    mov byte [0xB8000 + 165], 0x0C
+
+    ; Enable long mode in EFER
+    mov ecx, 0xC0000080
+    rdmsr
+    or eax, 0x100
+    wrmsr
+
+    mov byte [0xB8000 + 166], 'E'   ; EFER set
+    mov byte [0xB8000 + 167], 0x0C
+
+    ; Enable paging (activates long mode!)
+    mov eax, cr0
+    or eax, 0x80000000
+    mov cr0, eax
+
+    ; If we get here, long mode is ACTIVE!
+    mov byte [0xB8000 + 168], 'L'   ; Long mode!
+    mov byte [0xB8000 + 169], 0x0E
+
+    ; Load 64-bit GDT
+    lgdt [gdt64_descriptor]
+
+    ; Far jump to 64-bit code segment
+    jmp 0x08:long_mode_64
+
+    ; Should never get here
+    hlt
+
+[BITS 64]
+long_mode_64:
+    ; Setup 64-bit segments
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+
+    ; Clear screen in 64-bit mode
+    mov rdi, 0xB8000
+    mov rcx, 2000
+    mov rax, 0x0F200F20
+    rep stosq
+
+    ; Print message
+    mov rdi, 0xB8000
+    mov rsi, msg64
+    mov ah, 0x0A
+.loop:
+    lodsb
+    test al, al
+    jz .done
+    mov [rdi], ax
+    add rdi, 2
+    jmp .loop
+.done:
+
+    ; Initialize Forth (64-bit)
+    mov rsp, 0x80000        ; Data stack
+    mov rbp, 0x70000        ; Return stack
+    mov rsi, test_program   ; Instruction pointer
     jmp NEXT
 
-; NEXT - Forth inner interpreter
+; NEXT - Forth inner interpreter (64-bit)
 NEXT:
-    lodsd                   ; Load next word address into EAX
-    jmp eax                 ; Jump to the address in EAX
+    lodsq                   ; Load qword
+    jmp rax
 
-; Core Forth words
+; Core Forth words (64-bit)
 
-; DUP ( n -- n n )
 DUP:
-    mov eax, [esp]
-    push eax
+    mov rax, [rsp]
+    push rax
     jmp NEXT
 
-; DROP ( n -- )
 DROP:
-    add esp, 4
+    add rsp, 8
     jmp NEXT
 
-; SWAP ( a b -- b a )
 SWAP:
-    pop eax
-    pop ebx
-    push eax
-    push ebx
+    pop rax
+    pop rbx
+    push rax
+    push rbx
     jmp NEXT
 
-; + ( a b -- sum )
 PLUS:
-    pop eax
-    add [esp], eax
+    pop rax
+    add [rsp], rax
     jmp NEXT
 
-; * ( a b -- product )
 MULT:
-    pop eax
-    pop ebx
-    imul eax, ebx
-    push eax
+    pop rax
+    pop rbx
+    imul rax, rbx
+    push rax
     jmp NEXT
 
-; . ( n -- ) Print number
 DOT:
-    pop eax
+    pop rax
     call print_number
-    ; Add space after number
-    mov ebx, [cursor]
-    mov byte [ebx], ' '
-    mov byte [ebx+1], 0x0F
-    add ebx, 2
-    mov [cursor], ebx
+    mov rbx, [cursor]
+    mov byte [rbx], ' '
+    mov byte [rbx+1], 0x0F
+    add rbx, 2
+    mov [cursor], rbx
     jmp NEXT
 
-; LIT - Push next value
 LIT:
-    lodsd
-    push eax
+    lodsq
+    push rax
     jmp NEXT
 
-; EXIT/BYE - Halt
 BYE:
     cli
     hlt
     jmp $
 
-; Print number in EAX
+; Print number in RAX (64-bit)
 print_number:
-    push eax
-    push ebx
-    push ecx
-    push edx
+    push rax
+    push rbx
+    push rcx
+    push rdx
 
-    mov ebx, 10
-    xor ecx, ecx
+    mov rbx, 10
+    xor rcx, rcx
 
-    test eax, eax
+    test rax, rax
     jnz .conv
     mov al, '0'
     call emit_char
     jmp .done
 
 .conv:
-    xor edx, edx
-    div ebx
-    push edx
-    inc ecx
-    test eax, eax
+    xor rdx, rdx
+    div rbx
+    push rdx
+    inc rcx
+    test rax, rax
     jnz .conv
 
 .print:
-    pop eax
+    pop rax
     add al, '0'
     call emit_char
     loop .print
 
 .done:
-    pop edx
-    pop ecx
-    pop ebx
-    pop eax
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
     ret
 
-; Emit character in AL
 emit_char:
-    push eax
-    push ebx
-    mov ebx, [cursor]
-    mov [ebx], al
-    mov byte [ebx+1], 0x0E
-    add ebx, 2
-    mov [cursor], ebx
-    pop ebx
-    pop eax
+    push rax
+    push rbx
+    mov rbx, [cursor]
+    mov [rbx], al
+    mov byte [rbx+1], 0x0E
+    add rbx, 2
+    mov [cursor], rbx
+    pop rbx
+    pop rax
     ret
 
 ; Test program: 2 3 + . 5 7 * . BYE
 test_program:
-    dd LIT, 2
-    dd LIT, 3
-    dd PLUS
-    dd DOT
-    dd LIT, 5
-    dd LIT, 7
-    dd MULT
-    dd DOT
-    dd BYE
+    dq LIT, 2
+    dq LIT, 3
+    dq PLUS
+    dq DOT
+    dq LIT, 5
+    dq LIT, 7
+    dq MULT
+    dq DOT
+    dq BYE
 
-; GDT
+cursor: dq 0xB8000 + 160
+
+; GDT - 32-bit for now (we'll stay in compatibility mode)
 align 8
 gdt_start:
     dq 0
@@ -192,7 +268,7 @@ gdt_code:
     dw 0
     db 0
     db 10011010b
-    db 11001111b
+    db 11001111b        ; 32-bit (D=1, L=0)
     db 0
 
 gdt_data:
@@ -209,5 +285,32 @@ gdt_descriptor:
     dw gdt_end - gdt_start - 1
     dd gdt_start
 
-cursor: dd 0xB8000 + 160
-msg: db 'Simplicity OS v0.1 - Forth interpreter', 0
+; 64-bit GDT
+align 8
+gdt64_start:
+    dq 0                ; Null descriptor
+
+gdt64_code:
+    dw 0xFFFF
+    dw 0
+    db 0
+    db 10011010b
+    db 10101111b        ; G=1, L=1 (64-bit), D=0
+    db 0
+
+gdt64_data:
+    dw 0xFFFF
+    dw 0
+    db 0
+    db 10010010b
+    db 11001111b
+    db 0
+
+gdt64_end:
+
+gdt64_descriptor:
+    dw gdt64_end - gdt64_start - 1
+    dd gdt64_start
+
+msg: db 'Simplicity OS - Long mode test', 0
+msg64: db 'Simplicity OS v0.2 - 64-bit Forth', 0

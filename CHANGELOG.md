@@ -1,5 +1,57 @@
 # Simplicity OS - Changelog
 
+## [0.3.0] - 2025-11-26 - Stage 2 Complete - 64-BIT BREAKTHROUGH!
+
+### Major Achievement - 64-bit Long Mode Working!
+After extensive debugging, successfully implemented 64-bit long mode!
+
+### The Breakthrough
+**Key insight**: Keep 32-bit GDT during long mode setup, then load 64-bit GDT after.
+- Use 32-bit code segment to execute long mode transition
+- Clear page table memory BEFORE setting entries (critical!)
+- Page tables at 0x70000-0x72FFF work perfectly
+- Load new 64-bit GDT after long mode active
+- Far jump to 64-bit code segment
+
+### Features
+- Full CPU mode progression: 16-bit → 32-bit → 64-bit ✓
+- 64-bit Forth interpreter with NEXT loop ✓
+- 7 Forth words in 64-bit: LIT DUP DROP SWAP + * . BYE ✓
+- Test program executes: 2 3 + . 5 7 * . outputs "5 35" ✓
+- All using 64-bit registers (RAX, RBX, RSP, etc.) ✓
+
+### Technical Implementation
+- Stage2: 751 bytes (16-bit + 32-bit + 64-bit code)
+- Page tables: Identity map first 2MB
+- Two GDTs: 32-bit for setup, 64-bit for execution
+- 64-bit NEXT uses lodsq (load qword) and jmp rax
+- Stack values are 8 bytes (qword) not 4 bytes
+- Program data uses dq (define qword) not dd
+
+### What Works in 64-bit
+- Long mode activated successfully ✓
+- 64-bit code execution ✓
+- 64-bit Forth interpreter NEXT loop ✓
+- 64-bit arithmetic operations ✓
+- 64-bit stack manipulation ✓
+- VGA text output from 64-bit code ✓
+- Number printing in 64-bit ✓
+
+### Critical Lessons Learned
+1. Can't use 64-bit GDT while executing 32-bit code
+2. Must clear page table memory (rep stosd at 0x70000)
+3. Page table location 0x70000-0x72FFF is safe
+4. Need separate GDTs for 32-bit setup vs 64-bit execution
+5. [BITS 64] code works when placed after long mode transition
+
+### Next Steps - Stage 3
+1. Add more Forth words: - / ROT OVER @ !
+2. Implement keyboard input (PS/2 driver)
+3. Build interactive REPL
+4. Add DOCOL for colon definitions
+
+---
+
 ## [0.2.0] - 2025-11-26 - Stage 1 Complete
 
 ### Added - Working Forth Interpreter!
