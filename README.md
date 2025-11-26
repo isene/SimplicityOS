@@ -54,17 +54,19 @@ make debug
 
 ## Current Status
 
-**Stage 4 Complete** - Colon Definitions
+**Complete Interactive Forth OS**
 
-- Fully interactive Forth shell - Type code and watch it execute
-- PS/2 keyboard with full shift support
-- Complete REPL: Read-Eval-Print-Loop
-- **Colon definitions** - Define new words interactively
-- Dictionary with linked list - Multiple definitions persist
-- **15 built-in words**: + - * / . .s dup drop swap rot over emit cr
-- Stack persists across lines
+- Fully interactive Forth shell
+- PS/2 keyboard with shift support
+- **Colon definitions** - Define new words, including nested
+- **Variables** - Allocated storage
+- **Comments** - ( text ) for documentation
+- **Strings** - "text" auto-prints, works in definitions
+- **Introspection** - words, see, forget
+- **Built-in words**: + - * / . .s dup drop swap rot over @ ! emit cr
+- Dictionary with linked list
 - Case-insensitive
-- 10.3KB total
+- 10.9KB total
 
 **Example session:**
 ```forth
@@ -72,13 +74,30 @@ make debug
 ok
 > : double 2 * ;
 ok
-> : triple 3 * ;
+> : square4 square square ;
+ok (nested definitions work)
+> 2 square4 .
+256 ok (2^8 = 256)
+> variable x
 ok
-> 2 triple double square .
-144 ok
+> 100 x ! x @ .
+100 ok
+> : greet "Hello, Forth" cr ;
+ok (strings in definitions)
+> greet
+Hello, Forth
+ok
+> ( comments work ) 2 3 + .
+5 ok
+> words
+greet x square4 double square + - * / ... ok
+> see square
+: square (colon) ok
+> see x
+variable ok
 ```
 
-The language builds itself from user-defined words.
+Self-modifying language - builds itself through definitions.
 
 See CHANGELOG.md for complete feature list.
 

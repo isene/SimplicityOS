@@ -473,6 +473,30 @@ print_string:
     pop rax
     ret
 
+; Print null-terminated string in gray
+print_string_gray:
+    push rax
+    push rbx
+    push rcx
+    mov rbx, [cursor]
+    mov rcx, rax
+.loop:
+    mov al, [rcx]
+    cmp al, 0
+    je .done
+    mov [rbx], al
+    mov byte [rbx+1], 0x03      ; Dark cyan
+    add rbx, 2
+    inc rcx
+    jmp .loop
+.done:
+    mov [cursor], rbx
+    call update_hw_cursor
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
 ; REPL program: Jump to assembly REPL
 test_program:
     dq REPL
@@ -484,8 +508,9 @@ REPL:
     call print_string
     call newline
 
-    ; Initialize Forth stack once
-    mov r15, forth_stack
+    ; Initialize stacks
+    mov r15, forth_stack    ; Data stack
+    mov rbp, 0x70000        ; Return stack (grows down)
 
 .main_loop:
     ; Print prompt
@@ -606,12 +631,50 @@ REPL:
     jmp .exec_def
 
 .not_lit:
-    ; Regular word - call it
+    ; Check if it's a nested dictionary word
+    push rbx
+    push rcx
+
+    ; Is it in dict range?
+    cmp rax, dictionary_space
+    jl .is_builtin
+    mov rcx, [dict_here]
+    cmp rax, rcx
+    jge .is_builtin
+
+    ; Check if DOCOL
+    mov rbx, [rax]
+    cmp rbx, DOCOL
+    jne .is_builtin
+
+    ; Nested dictionary word - save RSI to return stack and recurse
+    mov [rbp], rsi
+    sub rbp, 8
+    add rax, 8              ; Point to body
+    mov rsi, rax
+    pop rcx
+    pop rbx
+    jmp .exec_def           ; Continue executing (now nested definition)
+
+.is_builtin:
+    pop rcx
+    pop rbx
     call rax
     jmp .exec_def
 
 .dict_done:
-    ; Restore parse position
+    ; Check if we're in a nested call
+    ; If RBP < initial value (0x70000), we have saved RSI on return stack
+    cmp rbp, 0x70000
+    jge .top_level
+
+    ; Nested - restore RSI from return stack and continue
+    add rbp, 8
+    mov rsi, [rbp]
+    jmp .exec_def
+
+.top_level:
+    ; Top level - restore parse position from machine stack
     pop rsi
     jmp .parse_loop
 
@@ -687,7 +750,7 @@ REPL:
 
 .line_done:
     mov rax, str_ok
-    call print_string
+    call print_string_gray
     call newline
 
     jmp .main_loop
@@ -1197,20 +1260,32 @@ lookup_word:
 
 .try_forget:
     cmp rcx, 6
-    jne .not_found
+    jne .try_see
     cmp byte [rdi], 'f'
-    jne .not_found
+    jne .try_see
     cmp byte [rdi+1], 'o'
-    jne .not_found
+    jne .try_see
     cmp byte [rdi+2], 'r'
-    jne .not_found
+    jne .try_see
     cmp byte [rdi+3], 'g'
-    jne .not_found
+    jne .try_see
     cmp byte [rdi+4], 'e'
-    jne .not_found
+    jne .try_see
     cmp byte [rdi+5], 't'
-    jne .not_found
+    jne .try_see
     mov rax, word_forget
+    jmp .done
+
+.try_see:
+    cmp rcx, 3
+    jne .not_found
+    cmp byte [rdi], 's'
+    jne .not_found
+    cmp byte [rdi+1], 'e'
+    jne .not_found
+    cmp byte [rdi+2], 'e'
+    jne .not_found
+    mov rax, word_see
     jmp .done
 
 .not_found:
@@ -1383,7 +1458,7 @@ word_words:
 
     mov rsi, [dict_latest]
     test rsi, rsi
-    jz .done
+    jz .show_builtins        ; No user defs, just show built-ins
 
 .loop:
     ; Save link for next iteration
@@ -1414,6 +1489,13 @@ word_words:
     test rsi, rsi
     jnz .loop
 
+.show_builtins:
+    ; Show built-in words
+    push rax
+    mov rax, str_builtins
+    call print_string
+    pop rax
+
 .done:
     pop rsi
     pop rcx
@@ -1421,9 +1503,10 @@ word_words:
     pop rax
     ret
 
+str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; words forget ', 0
+
 word_forget:
     ; Simplified FORGET - just removes latest word
-    ; TODO: Parse name and find specific word
     push rax
     mov rax, [dict_latest]
     test rax, rax
@@ -1436,6 +1519,53 @@ word_forget:
 .done:
     pop rax
     ret
+
+word_see:
+    ; Show word info - parse name and look it up
+    call skip_spaces
+    call parse_word
+    push rsi
+    call lookup_word
+    pop rsi
+
+    test rax, rax
+    jz .not_found
+
+    ; Check if dictionary word
+    cmp rax, dictionary_space
+    jl .is_builtin
+
+    ; Print ": name (colon def)"
+    push rax
+    mov al, ':'
+    call emit_char
+    mov al, ' '
+    call emit_char
+    mov rax, new_word_name
+    call print_string
+    mov al, ' '
+    call emit_char
+    mov rax, str_colon_type
+    call print_string
+    pop rax
+    ret
+
+.is_builtin:
+    push rax
+    mov rax, str_builtin_type
+    call print_string
+    pop rax
+    ret
+
+.not_found:
+    push rax
+    mov rax, str_unknown
+    call print_string
+    pop rax
+    ret
+
+str_colon_type: db '(colon)', 0
+str_builtin_type: db '(built-in)', 0
 
 word_colon:
     ; Set mode to get name next
