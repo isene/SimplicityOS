@@ -1,5 +1,73 @@
 # Simplicity OS - Changelog
 
+## [0.11] - 2025-11-27 - Critical Stack Fix
+
+### Bug Fix - Return Stack Memory Conflict
+Fixed critical bug where return stack overwrote page tables.
+
+**The Problem:**
+- Return stack was initialized at 0x70000
+- Page tables (PML4, PDPT, PD) also live at 0x70000-0x72FFF
+- Array literals use return stack to save position
+- Deep operations corrupted page tables → crashes
+
+**The Fix:**
+- Moved return stack from 0x70000 to 0x90000
+- Safe distance from page tables and other structures
+
+### Stack Convention Refinement
+- Clarified TOS register model
+- R15 = forth_stack + 8*depth (points past top)
+- R14 = Top of Stack (cached)
+- First push doesn't write to memory
+- Subsequent pushes: `mov [r15-8], r14` then `add r15, 8`
+
+---
+
+## [0.10] - 2025-11-27 - Arrays and Type Introspection
+
+### New Features - Generic Nested Data Types
+
+**Array Literals:**
+```forth
+{ 1 2 3 }           → creates ARRAY with 3 integers
+{ "a" "b" }         → array of strings
+{ { 1 2 } { 3 4 } } → nested arrays (fully supported)
+```
+
+**Type Introspection:**
+```forth
+{ 1 2 3 } type .    → 3 (TYPE_ARRAY)
+"hello" type .      → 1 (TYPE_STRING)
+42 type .           → 0 (TYPE_INT)
+```
+
+**Length Query:**
+```forth
+{ 1 2 3 } len .     → 3
+"hello" len .       → 5
+```
+
+**Enhanced .s Display:**
+```forth
+1 2 { 3 4 } .s      → <3> 1 2 [ARRAY:2] ok
+"hi" 42 .s          → <2> [STRING:2] 42 ok
+```
+
+### Type System Extended
+- TYPE_ARRAY = 3 added to type tags
+- Arrays store count + elements as objects
+- Full nesting: arrays in variables, variables in arrays
+- Type-aware `.s` shows `[TYPE:size]` for objects
+
+### Technical Implementation
+- Array literal uses return stack for position tracking
+- `{` saves current stack depth to return stack
+- `}` calculates item count, allocates, copies
+- Object structure: [type:8][count:8][elem0:8][elem1:8]...
+
+---
+
 ## [0.9.0] - 2025-11-27 - Pure Object Architecture
 
 **Note**: v1.0.0 reserved for complete OS with vim-like editor and real applications.

@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.3.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.11-brightgreen.svg)](CHANGELOG.md)
 [![Size](https://img.shields.io/badge/size-1.3KB-red.svg)](#)
 
 Bare-metal x86_64 operating system built on Forth principles.
@@ -63,10 +63,12 @@ make debug
 - **Comments** - ( text ) for documentation
 - **Strings** - "text" auto-prints, works in definitions
 - **Introspection** - words, see, forget
-- **Built-in words**: + - * / . .s dup drop swap rot over @ ! emit cr
+- **Arrays** - `{ 1 2 3 }` literal syntax with nested support
+- **Type introspection** - `type` and `len` words
+- **Built-in words**: + - * / . .s dup drop swap rot over @ ! emit cr len type
 - Dictionary with linked list
 - Case-insensitive
-- 10.9KB total
+- ~11KB total
 
 **Pure Data Architecture - Only `.` Prints:**
 ```forth
@@ -104,6 +106,18 @@ WorldHello ok (LIFO stack order)
 ok (pushes STRING list)
 > .
 square4 square x + - * / ... ok
+
+> { 1 2 3 }
+ok (ARRAY object pushed)
+> len .
+3 ok
+> type .
+3 ok (type 3 = ARRAY)
+
+> { "hello" { 1 2 } 42 }
+ok (nested array with string, array, int)
+> .s
+<1> [ARRAY:3] ok (type-aware stack display)
 ```
 
 **Key Principle**: Nothing prints except `.`
