@@ -30,6 +30,12 @@ Everything is a WORD. Hardware is directly composable.
 3. **Tick for references** - ~word gets reference, word executes
 4. **Objects, not primitives** - Strings are objects, not char arrays
 
+### Error Handling (MANDATORY)
+1. **No crashes** - All operations must validate input
+2. **Return error objects** - Push STRING error descriptions
+3. **Graceful degradation** - Invalid refs → "(invalid reference)"
+4. **Stack safety** - Check bounds before pop/push
+
 ### Memory Model (ENFORCED)
 1. **Heap starts at 2MB** - Grows upward, unbounded
 2. **No hardcoded addresses** - All pointers allocated

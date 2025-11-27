@@ -1429,20 +1429,40 @@ lookup_word:
 
 .try_forget:
     cmp rcx, 6
-    jne .try_see
+    jne .try_execute
     cmp byte [rdi], 'f'
-    jne .try_see
+    jne .try_execute
     cmp byte [rdi+1], 'o'
-    jne .try_see
+    jne .try_execute
     cmp byte [rdi+2], 'r'
-    jne .try_see
+    jne .try_execute
     cmp byte [rdi+3], 'g'
-    jne .try_see
+    jne .try_execute
     cmp byte [rdi+4], 'e'
+    jne .try_execute
+    cmp byte [rdi+5], 't'
+    jne .try_execute
+    mov rax, word_forget
+    jmp .done
+
+.try_execute:
+    cmp rcx, 7
+    jne .try_see
+    cmp byte [rdi], 'e'
+    jne .try_see
+    cmp byte [rdi+1], 'x'
+    jne .try_see
+    cmp byte [rdi+2], 'e'
+    jne .try_see
+    cmp byte [rdi+3], 'c'
+    jne .try_see
+    cmp byte [rdi+4], 'u'
     jne .try_see
     cmp byte [rdi+5], 't'
     jne .try_see
-    mov rax, word_forget
+    cmp byte [rdi+6], 'e'
+    jne .try_see
+    mov rax, word_execute
     jmp .done
 
 .try_see:
@@ -1691,61 +1711,82 @@ word_inspect:
 str_colon_ref: db '(colon)', 0
 str_builtin_ref: db '(built-in)', 0
 
-word_words:
-    ; List all dictionary words (traverse linked list)
-    push rax
+word_execute:
+    ; Execute code reference from stack
+    sub r15, 8
+    mov rax, [r15]          ; Pop reference
+
+    ; Validate reference (check for null/invalid)
+    test rax, rax
+    jz .invalid_ref
+
+    ; Check if dictionary word
     push rbx
-    push rcx
-    push rsi
+    cmp rax, dictionary_space
+    jl .exec_builtin
 
-    mov rsi, [dict_latest]
-    test rsi, rsi
-    jz .show_builtins        ; No user defs, just show built-ins
-
-.loop:
-    ; Save link for next iteration
-    mov rax, [rsi]
-    push rax
-
-    ; Skip link pointer
-    add rsi, 8
-
-    ; Get name length
-    movzx rcx, byte [rsi]
-    inc rsi
-
-    ; Print name
-.print_char:
-    mov al, [rsi]
-    call emit_char
-    inc rsi
-    dec rcx
-    jnz .print_char
-
-    mov al, ' '
-    call emit_char
-
-    ; Get next entry (from saved link)
-    pop rax
-    mov rsi, rax
-    test rsi, rsi
-    jnz .loop
-
-.show_builtins:
-    ; Show built-in words
-    push rax
-    mov rax, str_builtins
-    call print_string
-    pop rax
-
-.done:
-    pop rsi
-    pop rcx
+    mov rbx, [rax]
+    cmp rbx, DOCOL
     pop rbx
-    pop rax
+    jne .exec_builtin
+
+    ; Dictionary word - execute definition body
+    mov [rbp], rsi
+    sub rbp, 8
+    add rax, 8              ; Skip to body
+    mov rsi, rax
+
+.exec_loop:
+    lodsq
+    cmp rax, EXIT
+    je .exec_end
+
+    cmp rax, LIT
+    jne .exec_call
+    lodsq
+    mov [r15], rax
+    add r15, 8
+    jmp .exec_loop
+
+.exec_call:
+    call rax
+    jmp .exec_loop
+
+.exec_end:
+    add rbp, 8
+    mov rsi, [rbp]
     ret
 
-str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; words forget ', 0
+.exec_builtin:
+    call rax
+    ret
+
+.invalid_ref:
+    ; Push error STRING for invalid reference
+    push rsi
+    mov rsi, str_invalid_ref
+    call create_string_from_cstr
+    pop rsi
+    mov [r15], rax
+    add r15, 8
+    ret
+
+str_invalid_ref: db '(invalid reference)', 0
+
+word_words:
+    ; Create STRING listing all words (pure model - push, don't print)
+    ; For now, just push the built-in list as a STRING
+    ; TODO: Build dynamic string with user words prepended
+    push rsi
+    mov rsi, str_builtins
+    call create_string_from_cstr
+    pop rsi
+
+    mov [r15], rax
+    add r15, 8
+    ret
+
+str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~square ? words execute ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word
