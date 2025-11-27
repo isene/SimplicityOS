@@ -27,7 +27,7 @@ long_mode_64:
 
     ; Initialize Forth (64-bit)
     mov rsp, 0x80000        ; Data stack
-    mov rbp, 0x70000        ; Return stack
+    mov rbp, 0x90000        ; Return stack (away from page tables at 0x70000)
     mov rsi, test_program   ; Instruction pointer
     jmp NEXT
 
@@ -406,7 +406,7 @@ REPL:
     ; R15 points one past last item, R14 holds TOS
     mov r15, forth_stack    ; Data stack base
     mov r14, 0              ; Top of stack (TOS) - empty initially
-    mov rbp, 0x70000        ; Return stack (grows down)
+    mov rbp, 0x90000        ; Return stack (away from page tables at 0x70000) (grows down)
 
 .main_loop:
     ; Print prompt
@@ -476,6 +476,14 @@ REPL:
     ; Check for bracket [name] - named variable access
     cmp byte [rsi], '['
     je .handle_bracket
+
+    ; Check for array literal start {
+    cmp byte [rsi], '{'
+    je .handle_array_start
+
+    ; Check for array literal end }
+    cmp byte [rsi], '}'
+    je .handle_array_end
 
     ; Get word
     call parse_word         ; Returns word in RDI, length in RCX
@@ -573,7 +581,7 @@ REPL:
 .dict_done:
     ; Check if we're in a nested call
     ; If RBP < initial value (0x70000), we have saved RSI on return stack
-    cmp rbp, 0x70000
+    cmp rbp, 0x90000
     jge .top_level
 
     ; Nested - restore RSI from return stack and continue
@@ -635,11 +643,25 @@ REPL:
     cmp byte [compile_mode], 0
     jne .compile_literal
 
-    ; Interpret mode - push to stack with TOS
-    ; Push old TOS to memory, new value becomes TOS
-    mov [r15], r14
+    ; Interpret mode - push to stack
+    ; Convention: R15 = forth_stack + 8*depth
+    ; Empty: R15=forth_stack, R14=undefined
+    ; Depth N: R15=forth_stack+8N, R14=TOS, mem[0..N-2]=rest
+    ;
+    ; On push: if depth > 0, save old TOS to mem[depth-1], then set new TOS
+    cmp r15, forth_stack
+    je .push_first
+    ; Stack has items - save old TOS to memory at index (depth-1)
+    ; mem[depth-1] = mem[(R15-forth_stack)/8 - 1] = [R15-8]
+    mov [r15-8], r14
     add r15, 8
     mov r14, rax
+    jmp .parse_loop
+
+.push_first:
+    ; First item - just set TOS and mark stack non-empty
+    mov r14, rax
+    add r15, 8              ; R15 = forth_stack + 8 means depth 1
     jmp .parse_loop
 
 .compile_literal:
@@ -758,6 +780,158 @@ REPL:
     mov [r15], r14
     add r15, 8
     mov r14, rax
+    jmp .parse_loop
+
+.handle_array_start:
+    ; { - Save current depth on return stack, push marker
+    ; New convention: depth = (R15 - forth_stack) / 8
+    inc rsi                 ; Skip {
+    call skip_spaces
+
+    ; Save current R15 on return stack (this is our "marker")
+    mov [rbp], r15
+    sub rbp, 8
+    jmp .parse_loop
+
+.handle_array_end:
+    ; } - Create array from items pushed since {
+    inc rsi                 ; Skip }
+    call skip_spaces
+
+    ; Get saved R15 from return stack
+    add rbp, 8
+    mov rbx, [rbp]          ; RBX = R15 value when { was executed
+
+    ; Calculate number of items: current_depth - saved_depth
+    ; current_depth = (R15 - forth_stack) / 8
+    ; saved_depth = (RBX - forth_stack) / 8
+    ; items = current_depth - saved_depth
+    mov rax, r15
+    sub rax, rbx
+    shr rax, 3              ; Number of items
+    mov rcx, rax
+
+    ; If no items, create empty array
+    test rcx, rcx
+    jz .arr_empty
+
+    push rcx                ; Save count
+    push rbx                ; Save original R15
+    push rsi                ; Save parse pointer
+
+    ; Allocate array: header(16) + count*8
+    mov rax, rcx
+    shl rax, 3
+    add rax, 16
+    mov rcx, rax
+    call allocate_object
+    mov r8, rax             ; R8 = array object
+
+    pop rsi
+    pop rbx                 ; Original R15
+    pop rcx                 ; Count
+
+    ; Fill header
+    mov qword [r8], TYPE_ARRAY
+    mov [r8+8], rcx
+
+    ; Copy items from stack to array
+    ; With new convention:
+    ; - saved_depth items were on stack before {
+    ; - current_depth - saved_depth items were added
+    ; - Items to copy are in mem[saved_depth-1 .. current_depth-2] and R14
+    ; Wait, let me think again...
+    ;
+    ; Example: 5 { 1 2 3 }
+    ; After 5: R15 = +8 (depth 1), R14 = 5
+    ; { saves R15 = +8
+    ; After 1: R15 = +16 (depth 2), R14 = 1, mem[0] = 5
+    ; After 2: R15 = +24 (depth 3), R14 = 2, mem[0] = 5, mem[8] = 1
+    ; After 3: R15 = +32 (depth 4), R14 = 3, mem = [5, 1, 2]
+    ; } : items = (32-8)/8 = 3
+    ; Array should be [1, 2, 3]
+    ; Copy from mem[8], mem[16] (2 items) and R14 (1 item)
+    ; First memory item is at RBX = saved R15 - 8 + 8 = saved R15? No...
+    ;
+    ; Actually with new push logic:
+    ; After 5: R15 = +8, R14 = 5, mem empty (first push doesn't write)
+    ; { saves R15 = +8
+    ; After 1: R15 = +16, R14 = 1, mem[0] = 5
+    ; After 2: R15 = +24, R14 = 2, mem[0] = 5, mem[8] = 1
+    ; After 3: R15 = +32, R14 = 3, mem[0] = 5, mem[8] = 1, mem[16] = 2
+    ; } : items = (32-8)/8 = 3
+    ; Memory items for array: mem[8] and mem[16], plus R14
+    ; First item at saved_R15 = +8? No, mem[8] is at offset 8...
+    ;
+    ; Let me use indices: mem[i] means forth_stack + i*8
+    ; saved_depth = 1 (RBX = +8)
+    ; Items in memory at indices 1, 2, and TOS
+    ; mem[1] = 1, mem[2] = 2, R14 = 3
+    ; Start copying from mem[saved_depth] = mem[1]
+
+    lea rdi, [r8+16]        ; Array data start
+
+    ; Copy memory items: from mem[saved_depth] to mem[current_depth-2]
+    ; That's (count - 1) items from memory, then TOS
+    mov rax, rcx
+    dec rax                 ; Memory items to copy
+    mov rdx, rbx            ; Start at saved_R15 (= mem[saved_depth])
+
+.arr_copy:
+    test rax, rax
+    jz .arr_copy_tos
+    push rax
+    mov rax, [rdx]
+    mov [rdi], rax
+    add rdx, 8
+    add rdi, 8
+    pop rax
+    dec rax
+    jmp .arr_copy
+
+.arr_copy_tos:
+    ; Copy TOS as last element
+    mov [rdi], r14
+
+    ; Restore stack to state before {
+    ; R15 = saved R15, R14 = array
+    ; But we need to handle what was TOS before { ...
+    ; If depth was 1 before {: R15=+8, R14=5
+    ; After }: R15 should be +8, R14=array (replacing 5? No, 5 should stay!)
+    ;
+    ; Hmm, array should REPLACE the items, not add to them.
+    ; "5 { 1 2 3 }" should leave stack as: 5, array
+    ; So R15 = +16, mem[0] = 5, R14 = array
+    ;
+    ; Actually that's wrong too. "{ 1 2 3 }" should just give array.
+    ; "5 { 1 2 3 }" should give 5, array.
+    ;
+    ; With saved_R15 = +8 (depth 1 before {):
+    ; After }: we want depth = saved_depth + 1 = 2
+    ; R15 = +16, mem[0] = 5, R14 = array
+    ;
+    ; Actually simpler: R15 = RBX + 8, R14 = array
+    ; And if there was a TOS before {, it's already in memory!
+
+    lea r15, [rbx + 8]      ; Depth = saved_depth + 1
+    mov r14, r8             ; Array becomes TOS
+    jmp .parse_loop
+
+.arr_empty:
+    ; Create empty array (0 elements)
+    push rbx
+    push rsi
+    mov rcx, 16             ; Just header
+    call allocate_object
+    mov r8, rax
+    pop rsi
+    pop rbx
+
+    mov qword [r8], TYPE_ARRAY
+    mov qword [r8+8], 0
+
+    lea r15, [rbx + 8]
+    mov r14, r8
     jmp .parse_loop
 
 .line_done:
@@ -1496,7 +1670,7 @@ lookup_word:
 
 .try_free:
     cmp rcx, 4
-    jne .try_see
+    jne .try_screen_get
     cmp byte [rdi], 'f'
     jne .try_see
     cmp byte [rdi+1], 'r'
@@ -1504,20 +1678,72 @@ lookup_word:
     cmp byte [rdi+2], 'e'
     jne .try_see
     cmp byte [rdi+3], 'e'
-    jne .try_see
+    jne .try_screen_get
     mov rax, word_free
+    jmp .done
+
+.try_screen_get:
+    cmp rcx, 10
+    jne .try_see
+    cmp byte [rdi], 's'
+    jne .try_see
+    cmp byte [rdi+1], 'c'
+    jne .try_see
+    cmp byte [rdi+2], 'r'
+    jne .try_see
+    cmp byte [rdi+3], 'e'
+    jne .try_see
+    cmp byte [rdi+4], 'e'
+    jne .try_see
+    cmp byte [rdi+5], 'n'
+    jne .try_see
+    cmp byte [rdi+6], '-'
+    jne .try_see
+    cmp byte [rdi+7], 'g'
+    jne .try_see
+    cmp byte [rdi+8], 'e'
+    jne .try_see
+    cmp byte [rdi+9], 't'
+    jne .try_see
+    mov rax, word_screen_get
     jmp .done
 
 .try_see:
     cmp rcx, 3
-    jne .not_found
+    jne .try_len
     cmp byte [rdi], 's'
-    jne .not_found
+    jne .try_len
     cmp byte [rdi+1], 'e'
-    jne .not_found
+    jne .try_len
     cmp byte [rdi+2], 'e'
-    jne .not_found
+    jne .try_len
     mov rax, word_see
+    jmp .done
+
+.try_len:
+    cmp rcx, 3
+    jne .try_type
+    cmp byte [rdi], 'l'
+    jne .try_type
+    cmp byte [rdi+1], 'e'
+    jne .try_type
+    cmp byte [rdi+2], 'n'
+    jne .try_type
+    mov rax, word_len
+    jmp .done
+
+.try_type:
+    cmp rcx, 4
+    jne .not_found
+    cmp byte [rdi], 't'
+    jne .not_found
+    cmp byte [rdi+1], 'y'
+    jne .not_found
+    cmp byte [rdi+2], 'p'
+    jne .not_found
+    cmp byte [rdi+3], 'e'
+    jne .not_found
+    mov rax, word_type
     jmp .done
 
 .not_found:
@@ -1599,15 +1825,29 @@ word_dot:
     jmp .dot_done
 
 .dot_done:
-    ; Load new TOS after printing
+    ; Pop: decrement depth, load new TOS from memory
+    ; Convention: depth = (R15 - forth_stack) / 8
+    ; After pop: depth decreases by 1
     sub r15, 8
-    mov r14, [r15]
+    cmp r15, forth_stack
+    jle .dot_empty
+    ; Still have items - load new TOS from memory
+    mov r14, [r15 - 8]      ; mem[depth-2] becomes new TOS
+    ret
+
+.dot_empty:
+    ; Stack is now empty
+    mov r15, forth_stack
+    xor r14, r14            ; R14 undefined, set to 0
     ret
 
 str_code_obj: db '(code)', 0
 
 word_dots:
     ; Display stack: <depth> item1 item2 ...
+    ; Shows type-aware representation: 42 "str" [arr:3] (ref)
+    ; Convention: depth = (R15 - forth_stack) / 8
+    ; Depth 0: empty, Depth N: TOS in R14, rest in mem[0..N-2]
     push rax
     push rbx
     push rcx
@@ -1616,8 +1856,8 @@ word_dots:
     ; Calculate depth
     mov rax, r15
     sub rax, forth_stack
-    shr rax, 3              ; Divide by 8
-    mov rcx, rax            ; Save depth
+    shr rax, 3              ; Depth = (R15 - forth_stack) / 8
+    mov rcx, rax
 
     ; Print <depth>
     mov al, '<'
@@ -1626,27 +1866,132 @@ word_dots:
     call print_number
     mov al, '>'
     call emit_char
+
+    ; If empty, done
+    test rcx, rcx
+    jz .done
+
     mov al, ' '
     call emit_char
 
-    ; Print each stack item
-    test rcx, rcx
-    jz .done
+    ; Print memory items (depth - 1 items in mem[0..depth-2])
+    dec rcx                 ; Memory items = depth - 1
+    jz .print_tos           ; If was depth 1, skip to TOS
+
     mov rdi, forth_stack
 .loop:
     mov rax, [rdi]
-    call print_number
+    call print_value_typed
     mov al, ' '
     call emit_char
     add rdi, 8
     dec rcx
     jnz .loop
 
+.print_tos:
+    ; Print TOS (R14)
+    mov rax, r14
+    call print_value_typed
+
 .done:
     pop rdi
     pop rcx
     pop rbx
     pop rax
+    ret
+
+; Print value with type indicator
+; RAX = value to print
+print_value_typed:
+    push rbx
+
+    ; Check if immediate integer (< 0x100000)
+    cmp rax, 0x100000
+    jl .print_int
+
+    ; Object - check type
+    mov rbx, [rax]
+    cmp rbx, TYPE_STRING
+    je .print_str
+    cmp rbx, TYPE_ARRAY
+    je .print_arr
+    cmp rbx, TYPE_REF
+    je .print_ref
+
+    ; Unknown object - print address
+    call print_number
+    jmp .done
+
+.print_int:
+    call print_number
+    jmp .done
+
+.print_str:
+    ; Print "content" (abbreviated if long)
+    push rax
+    mov al, '"'
+    call emit_char
+    pop rax
+    push rax
+    lea rax, [rax+16]       ; String data
+    call print_string_short ; Max 10 chars
+    pop rax
+    push rax
+    mov al, '"'
+    call emit_char
+    pop rax
+    jmp .done
+
+.print_arr:
+    ; Print [arr:N]
+    push rax
+    mov al, '['
+    call emit_char
+    mov rax, str_arr_tag
+    call print_string
+    pop rax
+    mov rax, [rax+8]        ; Size
+    call print_number
+    mov al, ']'
+    call emit_char
+    jmp .done
+
+.print_ref:
+    ; Print (ref)
+    mov rax, str_ref_tag
+    call print_string
+    jmp .done
+
+.done:
+    pop rbx
+    ret
+
+str_arr_tag: db 'arr:', 0
+str_ref_tag: db '(ref)', 0
+
+; Print string, max 10 chars (for .s display)
+print_string_short:
+    push rbx
+    push rcx
+    mov rbx, rax
+    mov rcx, 10             ; Max chars
+.loop:
+    mov al, [rbx]
+    test al, al
+    jz .done
+    call emit_char
+    inc rbx
+    dec rcx
+    jz .truncated
+    jmp .loop
+.truncated:
+    mov al, '.'
+    call emit_char
+    call emit_char
+    call emit_char
+.done:
+    pop rcx
+    pop rbx
     ret
 
 word_dup:
@@ -1656,9 +2001,15 @@ word_dup:
     ret
 
 word_drop:
-    ; Drop TOS: load new TOS from stack
+    ; Drop TOS: decrement depth, load new TOS from memory
     sub r15, 8
-    mov r14, [r15]
+    cmp r15, forth_stack
+    jle .drop_empty
+    mov r14, [r15 - 8]
+    ret
+.drop_empty:
+    mov r15, forth_stack
+    xor r14, r14
     ret
 
 word_swap:
@@ -1921,6 +2272,100 @@ word_free:
     mov r14, [r15]
     ret
 
+word_len:
+    ; LEN - Get length of array or string ( obj -- length )
+    mov rax, r14
+
+    ; Check if immediate (no length)
+    cmp rax, 0x100000
+    jl .len_zero
+
+    ; Get type
+    mov rbx, [rax]
+    cmp rbx, TYPE_STRING
+    je .len_string
+    cmp rbx, TYPE_ARRAY
+    je .len_array
+
+    ; Unknown type - return 0
+.len_zero:
+    xor r14, r14
+    ret
+
+.len_string:
+    ; String length is in header
+    mov r14, [rax+8]
+    ret
+
+.len_array:
+    ; Array length is in header
+    mov r14, [rax+8]
+    ret
+
+word_type:
+    ; TYPE - Get type tag of value ( val -- type )
+    ; Returns: 0=INT, 1=STRING, 2=REF, 3=ARRAY
+    mov rax, r14
+
+    ; Check if immediate integer
+    cmp rax, 0x100000
+    jl .type_int
+
+    ; Get type from object header
+    mov r14, [rax]
+    ret
+
+.type_int:
+    xor r14, r14              ; TYPE_INT = 0
+    ret
+
+word_screen_get:
+    ; SCREEN-GET - Query VGA text mode parameters
+    ; Returns ARRAY: ( width height cursor_x cursor_y )
+
+    ; Create 4-element array
+    push rax
+    push rbx
+    push rcx
+
+    ; Allocate array
+    mov rcx, 48             ; 16 (header) + 4*8 (data)
+    call allocate_object
+
+    ; Fill header
+    mov qword [rax], TYPE_ARRAY
+    mov qword [rax+8], 4    ; 4 elements
+
+    ; Save array address
+    mov r8, rax
+
+    ; Get cursor position from VGA cursor variable
+    mov rbx, [cursor]       ; Get cursor address
+    sub rbx, 0xB8000        ; Offset from VGA start
+    shr rbx, 1              ; Convert bytes to char position
+
+    ; Divide by 80 to get row and col
+    mov rax, rbx
+    xor rdx, rdx
+    mov rcx, 80
+    div rcx                 ; RAX = row (Y), RDX = col (X)
+
+    ; Store params in array
+    mov qword [r8+16], 80   ; [0] Width
+    mov qword [r8+24], 25   ; [1] Height
+    mov qword [r8+32], rdx  ; [2] Cursor X (col)
+    mov qword [r8+40], rax  ; [3] Cursor Y (row)
+
+    ; Restore and push array to TOS
+    pop rcx
+    pop rbx
+    pop rax                 ; Restore RAX
+
+    mov [r15], r14          ; Push old TOS
+    add r15, 8
+    mov r14, r8             ; Array becomes new TOS
+    ret
+
 word_words:
     ; Push STRING listing all words
     push rsi
@@ -1934,7 +2379,7 @@ word_words:
     mov r14, rax
     ret
 
-str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~square ? words execute ', 0
+str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute screen-get len type array at put { } ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word
