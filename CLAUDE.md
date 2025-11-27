@@ -36,6 +36,12 @@ Everything is a WORD. Hardware is directly composable.
 3. **Graceful degradation** - Invalid refs → "(invalid reference)"
 4. **Stack safety** - Check bounds before pop/push
 
+### Stack Discipline (STRICT)
+1. **Document stack effects** - Every word shows ( in -- out )
+2. **Validate critical operations** - @ and ! check address validity
+3. **Correct order** - `!` is ( value addr -- ) so use: `100 [x] !` not `[x] 100 !`
+4. **Type awareness** - Operations should check when possible
+
 ### Register Conventions (DOCUMENTED)
 ```
 R14 = Top of stack (TOS) - Cached for performance

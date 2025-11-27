@@ -276,7 +276,7 @@ wait_key:
     ; Convert scancode to ASCII
     call scancode_to_ascii
 
-    ; If zero (unmapped key), wait for another
+    ; If zero (unmapped key), ignore it
     test rax, rax
     jz .wait
 
@@ -291,183 +291,57 @@ wait_key:
     mov byte [shift_state], 0
     jmp .wait
 
-; Convert scancode in AL to ASCII in RAX
+; Convert scancode to ASCII using direct table lookup
+; Why: Faster than jump chain, cleaner code
 scancode_to_ascii:
     push rbx
-    movzx rbx, al           ; Zero-extend AL to RBX
+    movzx rbx, al           ; Scancode as index
 
-    ; Backspace (scancode 0x0E)
-    cmp rbx, 0x0E
-    jne .check_numbers
-    mov rax, 8              ; ASCII backspace
-    jmp .done
-
-.check_numbers:
-    ; Numbers 1-9,0 (scancodes 0x02-0x0B)
-    cmp rbx, 0x02
-    jl .letters
-    cmp rbx, 0x0B
-    jg .check_special
-
-    ; Check if shift pressed
+    ; Select table based on shift state
     cmp byte [shift_state], 0
-    je .numbers_no_shift
+    je .use_normal
 
-    ; Shifted number keys: !@#$%^&*()
-    sub rbx, 0x02
-    lea rax, [shift_numbers]
-    add rax, rbx
-    movzx rax, byte [rax]
-    jmp .done
-
-.numbers_no_shift:
-    ; Numbers 1-9,0
-    sub rbx, 0x02
-    cmp rbx, 9
-    jne .digit
-    mov rax, '0'            ; Scancode 0x0B = '0'
-    jmp .done
-.digit:
-    add rbx, '1'
-    mov rax, rbx
-    jmp .done
-
-.check_special:
-    ; Minus/underscore (scancode 0x0C)
-    cmp rbx, 0x0C
-    jne .check_equals
-    mov rax, '-'
-    cmp byte [shift_state], 0
-    je .done
-    mov rax, '_'
-    jmp .done
-
-.check_equals:
-    ; Equals/plus (scancode 0x0D)
-    cmp rbx, 0x0D
-    jne .check_period
-    mov rax, '='
-    cmp byte [shift_state], 0
-    je .done
-    mov rax, '+'
-    jmp .done
-
-.check_period:
-    ; Period (scancode 0x34)
-    cmp rbx, 0x34
-    jne .check_comma
-    mov rax, '.'
-    cmp byte [shift_state], 0
-    je .done
-    mov rax, '>'
-    jmp .done
-
-.check_comma:
-    ; Comma (scancode 0x33)
-    cmp rbx, 0x33
-    jne .check_slash
-    mov rax, ','
-    cmp byte [shift_state], 0
-    je .done
-    mov rax, '<'
-    jmp .done
-
-.check_slash:
-    ; Slash (scancode 0x35)
-    cmp rbx, 0x35
-    jne .check_semicolon
-    mov rax, '/'
-    cmp byte [shift_state], 0
-    je .done
-    mov rax, '?'
-    jmp .done
-
-.check_semicolon:
-    ; Semicolon/colon (scancode 0x27)
-    cmp rbx, 0x27
-    jne .check_backtick
-    mov rax, ';'
-    cmp byte [shift_state], 0
-    je .done
-    mov rax, ':'
-    jmp .done
-
-.check_backtick:
-    ; Backtick/tilde (scancode 0x29)
-    cmp rbx, 0x29
-    jne .check_apostrophe
-    mov rax, 96             ; Backtick `
-    cmp byte [shift_state], 0
-    je .done
-    mov rax, 126            ; Tilde ~
-    jmp .done
-
-.check_apostrophe:
-    ; Apostrophe/quote (scancode 0x28)
-    cmp rbx, 0x28
-    jne .letters
-    mov rax, 39             ; Apostrophe '
-    cmp byte [shift_state], 0
-    je .done
-    mov rax, 34             ; Double quote "
-    jmp .done
-
-.letters:
-    ; Letter scancodes (0x10-0x19 = QWERTYUIOP, etc)
-    ; Simple mapping for common keys
-    mov rax, 0
-
-    ; Space (scancode 0x39)
-    cmp bl, 0x39
-    jne .check_enter
-    mov rax, ' '
-    jmp .done
-
-.check_enter:
-    ; Enter (scancode 0x1C)
-    cmp bl, 0x1C
-    jne .check_letters
-    mov rax, 10             ; Newline
-    jmp .done
-
-.check_letters:
-    ; Q-P (0x10-0x1C)
-    lea rax, [scancode_table]
-    cmp bl, 0x50
-    jge .done
-    add rax, rbx
-    movzx rax, byte [rax]
-
-    ; If shift pressed, convert to uppercase
-    test rax, rax
-    jz .done
-    cmp byte [shift_state], 0
-    je .done
-
-    ; Convert a-z to A-Z
-    cmp al, 'a'
-    jl .done
-    cmp al, 'z'
-    jg .done
-    sub al, 32              ; 'a' - 'A' = 32
-
-.done:
+    ; Shifted - use shift table
+    movzx rax, byte [scancode_shift_table + rbx]
     pop rbx
     ret
 
-; Scancode to ASCII table
-scancode_table:
-    times 0x10 db 0
-    db 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'  ; 0x10-0x19
-    db '[', ']', 0, 0                                     ; 0x1A-0x1D (brackets)
-    db 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'      ; 0x1E-0x26
-    db 0, 0, 0, 0, 0                                      ; 0x27-0x2B (5 zeros!)
-    db 'z', 'x', 'c', 'v', 'b', 'n', 'm'                ; 0x2C-0x32
-    times 0x20 db 0
+.use_normal:
+    ; Normal - use normal table
+    movzx rax, byte [scancode_normal_table + rbx]
+    pop rbx
+    ret
 
-; Shifted number row: 1-9,0 → !@#$%^&*()
-shift_numbers:
-    db '!', '@', '#', '$', '%', '^', '&', '*', '(', ')'
+; Optimized scancode tables - Direct 256-byte lookup (no jumps)
+; Why: Faster and cleaner than jump chain
+
+scancode_normal_table:
+    times 0x02 db 0
+    db '1','2','3','4','5','6','7','8','9','0'          ; 0x02-0x0B
+    db '-','=', 8, 0                                     ; 0x0C-0x0F (minus, equals, backspace, tab)
+    db 'q','w','e','r','t','y','u','i','o','p'          ; 0x10-0x19
+    db '[',']', 10, 0                                    ; 0x1A-0x1D (brackets, enter, ctrl)
+    db 'a','s','d','f','g','h','j','k','l'              ; 0x1E-0x26
+    db ';', 39, 96, 0, 0                                 ; 0x27-0x2B (semicolon, apostrophe, backtick, lshift, backslash)
+    db 'z','x','c','v','b','n','m'                      ; 0x2C-0x32
+    db ',','.','/', 0, 0, 0                              ; 0x33-0x38
+    db ' ', 0, 0, 0, 0, 0, 0                            ; 0x39-0x3F (space + unmapped)
+    db 0, 0, 0, 0, 0, 0, 0, 0, 0                         ; 0x40-0x48
+    db 0, 0, 0, 0, 0, 0, 0                               ; 0x49-0x4F
+    times 0xB0 db 0                                      ; Rest - will add Norwegian when we find scancodes
+
+scancode_shift_table:
+    times 0x02 db 0
+    db '!','@','#','$','%','^','&','*','(',')'          ; 0x02-0x0B (shifted numbers)
+    db '_','+', 8, 0                                     ; 0x0C-0x0F
+    db 'Q','W','E','R','T','Y','U','I','O','P'          ; 0x10-0x19 (uppercase)
+    db '{','}', 10, 0                                    ; 0x1A-0x1D
+    db 'A','S','D','F','G','H','J','K','L'              ; 0x1E-0x26 (uppercase)
+    db ':', 34, 126, 0, 0                                ; 0x27-0x2B (colon, quote, tilde)
+    db 'Z','X','C','V','B','N','M'                      ; 0x2C-0x32 (uppercase)
+    db '<','>','?', 0, 0, 0                              ; 0x33-0x38
+    db ' '                                               ; 0x39
+    times 0xC7 db 0
 
 ; Print null-terminated string from RAX
 print_string:
@@ -962,7 +836,7 @@ get_or_create_named_var:
 
     ; Get name STRING from this slot
     mov rbx, [rsi]
-    test rbx, rax
+    test rbx, rbx
     jz .not_found
 
     ; Compare names (simplified - just compare first char for now)
@@ -1829,12 +1703,29 @@ word_cr:
 
 word_fetch:
     ; Fetch: TOS is address, replace with value at address
+    ; Validate address (check it's not a small immediate)
+    cmp r14, 1000
+    jl .fetch_invalid       ; Very small values likely wrong
+
     mov rax, [r14]
+    mov r14, rax
+    ret
+
+.fetch_invalid:
+    ; Return error STRING
+    push rsi
+    mov rsi, str_bad_addr
+    call create_string_from_cstr
+    pop rsi
     mov r14, rax
     ret
 
 word_store:
     ; Store: ( value addr -- ) second=value, TOS=addr
+    ; Validate address (basic check)
+    cmp r14, 1000
+    jl .store_invalid
+
     mov rax, r14            ; Address
     sub r15, 8
     mov rbx, [r15]          ; Value
@@ -1842,6 +1733,19 @@ word_store:
     sub r15, 8
     mov r14, [r15]          ; New TOS
     ret
+
+.store_invalid:
+    ; Return error, clean stack
+    sub r15, 8
+    sub r15, 8
+    push rsi
+    mov rsi, str_bad_addr
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
+    ret
+
+str_bad_addr: db '(bad address)', 0
 
 word_inspect:
     ; ? - Inspect reference from TOS, push STRING description
