@@ -1,6 +1,8 @@
 # Simplicity OS - Changelog
 
-## [1.0.0] - 2025-11-27 - Pure Object Architecture
+## [0.9.0] - 2025-11-27 - Pure Object Architecture
+
+**Note**: v1.0.0 reserved for complete OS with vim-like editor and real applications.
 
 ### Paradigm Shift - Everything Is Data
 Complete architectural refactor to pure data-oriented model.

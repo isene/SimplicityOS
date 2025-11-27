@@ -459,7 +459,7 @@ scancode_to_ascii:
 scancode_table:
     times 0x10 db 0
     db 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'  ; 0x10-0x19
-    db 0, 0, 0, 0                                         ; 0x1A-0x1D
+    db '[', ']', 0, 0                                     ; 0x1A-0x1D (brackets)
     db 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'      ; 0x1E-0x26
     db 0, 0, 0, 0, 0                                      ; 0x27-0x2B (5 zeros!)
     db 'z', 'x', 'c', 'v', 'b', 'n', 'm'                ; 0x2C-0x32
@@ -596,6 +596,10 @@ REPL:
     ; Check for quote (") - string literal
     cmp byte [rsi], 34      ; Double quote
     je .handle_string
+
+    ; Check for bracket [name] - named variable access
+    cmp byte [rsi], '['
+    je .handle_bracket
 
     ; Get word
     call parse_word         ; Returns word in RDI, length in RCX
@@ -792,6 +796,39 @@ REPL:
     add r15, 8
     jmp .parse_loop
 
+.handle_bracket:
+    ; [name] - Get/create named variable and push address of its value
+    inc rsi                 ; Skip [
+
+    ; Parse name until ]
+    mov rdi, rsi
+    xor rcx, rcx
+.bracket_parse:
+    mov al, [rsi]
+    test al, al
+    jz .bracket_done
+    cmp al, ']'
+    je .bracket_done
+    inc rsi
+    inc rcx
+    jmp .bracket_parse
+.bracket_done:
+    inc rsi                 ; Skip ]
+
+    ; Look up or create named variable
+    push rsi
+    push rdi
+    push rcx
+    call get_or_create_named_var    ; Returns value slot address in RAX
+    pop rcx
+    pop rdi
+    pop rsi
+
+    ; Push address of value slot
+    mov [r15], rax
+    add r15, 8
+    jmp .parse_loop
+
 .handle_string:
     ; Create STRING object
     inc rsi                 ; Skip opening quote
@@ -891,6 +928,78 @@ create_string_from_cstr:
     inc rdi
     jmp .copy
 .done:
+
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rbx
+    ret
+
+; Get or create named variable (RDI=name, RCX=length)
+; Returns address of value slot in RAX
+get_or_create_named_var:
+    push rbx
+    push rcx
+    push rdi
+    push rsi
+
+    ; Search existing variables
+    mov rsi, named_vars
+    mov rax, [named_var_count]
+    shl rax, 4              ; Each entry is 16 bytes
+    add rax, named_vars     ; End marker
+
+.search_loop:
+    cmp rsi, rax
+    jge .not_found
+
+    ; Get name STRING from this slot
+    mov rbx, [rsi]
+    test rbx, rax
+    jz .not_found
+
+    ; Compare names (simplified - just compare first char for now)
+    ; TODO: Full string comparison
+    lea rbx, [rbx+16]       ; String data
+    mov r8b, [rbx]
+    mov r9b, [rdi]
+    cmp r8b, r9b
+    je .found               ; Found it (simplified match)
+
+    add rsi, 16             ; Next entry
+    jmp .search_loop
+
+.not_found:
+    ; Create new entry
+    mov rsi, [named_var_count]
+    shl rsi, 4
+    add rsi, named_vars
+
+    ; Create name STRING
+    push rsi
+    push rdi
+    push rcx
+    mov rax, rdi
+    push rax
+    mov rsi, rax
+    call create_string_from_cstr
+    pop rcx
+    pop rcx
+    pop rdi
+    pop rsi
+
+    ; Store name STRING
+    mov [rsi], rax
+
+    ; Initialize value to 0
+    mov qword [rsi+8], 0
+
+    ; Increment count
+    inc qword [named_var_count]
+
+.found:
+    ; Return address of value slot
+    lea rax, [rsi+8]
 
     pop rsi
     pop rdi
@@ -1447,7 +1556,7 @@ lookup_word:
 
 .try_execute:
     cmp rcx, 7
-    jne .try_see
+    jne .try_array
     cmp byte [rdi], 'e'
     jne .try_see
     cmp byte [rdi+1], 'x'
@@ -1461,8 +1570,60 @@ lookup_word:
     cmp byte [rdi+5], 't'
     jne .try_see
     cmp byte [rdi+6], 'e'
-    jne .try_see
+    jne .try_array
     mov rax, word_execute
+    jmp .done
+
+.try_array:
+    cmp rcx, 5
+    jne .try_at
+    cmp byte [rdi], 'a'
+    jne .try_at
+    cmp byte [rdi+1], 'r'
+    jne .try_at
+    cmp byte [rdi+2], 'r'
+    jne .try_at
+    cmp byte [rdi+3], 'a'
+    jne .try_at
+    cmp byte [rdi+4], 'y'
+    jne .try_at
+    mov rax, word_array
+    jmp .done
+
+.try_at:
+    cmp rcx, 2
+    jne .try_put
+    cmp byte [rdi], 'a'
+    jne .try_put
+    cmp byte [rdi+1], 't'
+    jne .try_put
+    mov rax, word_at
+    jmp .done
+
+.try_put:
+    cmp rcx, 3
+    jne .try_free
+    cmp byte [rdi], 'p'
+    jne .try_free
+    cmp byte [rdi+1], 'u'
+    jne .try_free
+    cmp byte [rdi+2], 't'
+    jne .try_free
+    mov rax, word_put
+    jmp .done
+
+.try_free:
+    cmp rcx, 4
+    jne .try_see
+    cmp byte [rdi], 'f'
+    jne .try_see
+    cmp byte [rdi+1], 'r'
+    jne .try_see
+    cmp byte [rdi+2], 'e'
+    jne .try_see
+    cmp byte [rdi+3], 'e'
+    jne .try_see
+    mov rax, word_free
     jmp .done
 
 .try_see:
@@ -1773,6 +1934,76 @@ word_execute:
 
 str_invalid_ref: db '(invalid reference)', 0
 
+word_array:
+    ; Create ARRAY object ( size -- array )
+    sub r15, 8
+    mov rax, [r15]          ; Pop size
+
+    ; Allocate: header(16) + size*8 bytes
+    push rax
+    shl rax, 3              ; size * 8
+    add rax, 16
+    mov rcx, rax
+    call allocate_object
+    pop rcx                 ; Restore size
+
+    ; Fill header
+    mov qword [rax], TYPE_ARRAY
+    mov [rax+8], rcx
+
+    ; Initialize array to zeros
+    lea rdi, [rax+16]
+    push rax
+    mov rax, rcx
+.zero_loop:
+    mov qword [rdi], 0
+    add rdi, 8
+    dec rax
+    jnz .zero_loop
+    pop rax
+
+    ; Push array object
+    mov [r15], rax
+    add r15, 8
+    ret
+
+word_at:
+    ; Array access ( array index -- value )
+    sub r15, 8
+    mov rbx, [r15]          ; Pop index
+    sub r15, 8
+    mov rax, [r15]          ; Pop array
+
+    ; Get element address: array + 16 + (index * 8)
+    lea rax, [rax + 16 + rbx*8]
+    mov rax, [rax]
+
+    ; Push value
+    mov [r15], rax
+    add r15, 8
+    ret
+
+word_put:
+    ; Array store ( value array index -- )
+    sub r15, 8
+    mov rbx, [r15]          ; Pop index
+    sub r15, 8
+    mov rcx, [r15]          ; Pop array
+    sub r15, 8
+    mov rax, [r15]          ; Pop value
+
+    ; Store: array[index] = value
+    lea rcx, [rcx + 16 + rbx*8]
+    mov [rcx], rax
+    ret
+
+word_free:
+    ; Free object ( obj -- )
+    ; TODO: Implement proper free list
+    ; For now: stub (bump allocator can't free)
+    sub r15, 8              ; Pop and discard
+    ret
+
 word_words:
     ; Create STRING listing all words (pure model - push, don't print)
     ; For now, just push the built-in list as a STRING
@@ -1893,6 +2124,10 @@ TYPE_INT equ 0
 TYPE_STRING equ 1
 TYPE_REF equ 2
 TYPE_ARRAY equ 3
+
+; Named variables namespace (simple linear list)
+named_vars: times 1024 dq 0     ; 128 variable slots (name_hash, value)
+named_var_count: dq 0
 
 cursor: dq 0xB8000 + 160
 

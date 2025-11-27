@@ -36,6 +36,22 @@ Everything is a WORD. Hardware is directly composable.
 3. **Graceful degradation** - Invalid refs → "(invalid reference)"
 4. **Stack safety** - Check bounds before pop/push
 
+### Register Conventions (DOCUMENTED)
+```
+R15 = Forth data stack pointer (grows up: push = [R15], R15+=8)
+RBP = Return stack pointer (grows down: push = [RBP], RBP-=8)
+RSI = Instruction pointer during definition execution
+RSP = Machine stack (for function calls, preserved)
+
+Scratch registers (caller-saved):
+RAX, RBX, RCX, RDX = Temporary, not preserved across operations
+R8-R13 = Available for complex operations
+
+Preserved across word calls:
+R15, RBP = Stack pointers (never corrupted)
+RSI = Only modified during definition execution
+```
+
 ### Memory Model (ENFORCED)
 1. **Heap starts at 2MB** - Grows upward, unbounded
 2. **No hardcoded addresses** - All pointers allocated
