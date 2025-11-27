@@ -1,5 +1,65 @@
 # Simplicity OS - Changelog
 
+## [1.0.0] - 2025-11-27 - Pure Object Architecture
+
+### Paradigm Shift - Everything Is Data
+Complete architectural refactor to pure data-oriented model.
+
+**Core Principle: ONLY `.` PRINTS**
+- All operations push data to stack
+- No side-effect output anywhere
+- `.` is the single point of rendering
+- Detects type and displays appropriately
+
+### Pure RPN Consistency
+- Meta-operations use tick: `~square ?` not `see square`
+- Fully RPN: data then operation, always
+- Tick (~) gets references without executing
+- `?` operates on references to show type
+
+### Object Model Implementation
+- Type-tagged objects with headers
+- Dynamic heap allocation (starts at 2MB)
+- No fixed-size buffers
+- Scalable to petabytes
+
+**Object Structure:**
+```
+[8 bytes: type tag]
+[8 bytes: size]
+[N bytes: data]
+```
+
+**Type Tags:**
+- 0: Immediate integer (< 0x100000, no header)
+- 1: STRING object
+- 2: Code reference
+- 3+: Future (arrays, images, apps)
+
+### Examples
+```forth
+"Test"          → pushes STRING, no output
+.               → prints "Test"
+~square ?       → pushes STRING "(colon)"
+.               → prints "(colon)"
+2 3 + .         → 5 ok (immediate integers)
+```
+
+### Technical Changes
+- Heap allocator (bump allocator at 2MB+)
+- create_string_from_cstr helper
+- Type-aware . operator
+- word_inspect creates STRING objects
+- Memory mapped to 4MB (expandable)
+
+### Architectural Guardrails Added
+- Documented in CLAUDE.md
+- Strict rules for future development
+- Pure data model enforced
+- Scalability requirements defined
+
+---
+
 ## [0.5.0] - 2025-11-26 - Stage 4 Complete - Colon Definitions
 
 ### Major Feature - Define New Words Interactively

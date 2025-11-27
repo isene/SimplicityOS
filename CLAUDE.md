@@ -11,6 +11,41 @@ Everything is a WORD. Hardware is directly composable.
 4. **Lego composability** - Complex from simple, always
 5. **Introspectable** - See and modify everything at runtime
 
+## CRITICAL ARCHITECTURAL GUARDRAILS
+
+### Pure Data Model (NEVER VIOLATE)
+1. **ONLY `.` prints** - No other operation produces output
+2. **Everything pushes to stack** - All operations return data
+3. **No side-effect output** - Operations manipulate, don't display
+
+### Object Model (MANDATORY)
+1. **No fixed-size allocations** - Everything grows dynamically
+2. **All data is objects** - With type headers
+3. **Scalable to petabytes** - 1TB apps, 2PB data supported
+4. **Type-tagged** - Every object knows its type
+
+### Consistency Rules (STRICT)
+1. **Pure RPN** - All operations including meta (tick + operator)
+2. **No prefix operations** - Always: data then operation
+3. **Tick for references** - ~word gets reference, word executes
+4. **Objects, not primitives** - Strings are objects, not char arrays
+
+### Memory Model (ENFORCED)
+1. **Heap starts at 2MB** - Grows upward, unbounded
+2. **No hardcoded addresses** - All pointers allocated
+3. **Object headers** - [type:8][size:8][data:N]
+4. **Page tables map as needed** - Currently 0-4MB, expand on demand
+
+### Type System (REQUIRED)
+```
+TYPE_INT = 0        (immediate, no header, value < 0x100000)
+TYPE_STRING = 1     (null-terminated text)
+TYPE_REF = 2        (execution token)
+TYPE_ARRAY = 3      (future)
+TYPE_IMAGE = 4      (future)
+TYPE_APP = 5        (future)
+```
+
 ## Design Constraints
 - BIOS boot (simpler than UEFI)
 - x86_64 protected mode → long mode

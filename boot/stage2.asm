@@ -59,7 +59,8 @@ prot_mode:
     ; Build page tables at 0x70000
     mov dword [0x70000], 0x71003    ; PML4[0] -> PDPT at 0x71000
     mov dword [0x71000], 0x72003    ; PDPT[0] -> PD at 0x72000
-    mov dword [0x72000], 0x000083   ; PD[0] -> 2MB page
+    mov dword [0x72000], 0x000083   ; PD[0] -> first 2MB page
+    mov dword [0x72008], 0x200083   ; PD[1] -> second 2MB page (2-4MB)
 
     ; Debug: Print progress markers
     mov byte [0xB8000 + 160], 'P'   ; Page tables built

@@ -68,36 +68,48 @@ make debug
 - Case-insensitive
 - 10.9KB total
 
-**Example session:**
+**Pure Data Architecture - Only `.` Prints:**
 ```forth
+> "Test"
+ok (STRING object pushed, no output)
+> .
+Test ok (. detects STRING and prints)
+
+> 2 3 +
+ok (5 pushed as immediate)
+> .
+5 ok (. prints number)
+
 > : square dup * ;
 ok
-> : double 2 * ;
-ok
 > : square4 square square ;
-ok (nested definitions work)
+ok (nested definitions)
 > 2 square4 .
-256 ok (2^8 = 256)
+256 ok (2^8)
+
+> ~square ?
+ok (pushes STRING "(colon)")
+> .
+(colon) ok (. prints it)
+
 > variable x
 ok
 > 100 x ! x @ .
 100 ok
-> : greet "Hello, Forth" cr ;
-ok (strings in definitions)
-> greet
-Hello, Forth
-ok
-> ( comments work ) 2 3 + .
-5 ok
+
+> "Hello" "World" . .
+WorldHello ok (LIFO stack order)
+
 > words
-greet x square4 double square + - * / ... ok
-> see square
-: square (colon) ok
-> see x
-variable ok
+ok (pushes STRING list)
+> .
+square4 square x + - * / ... ok
 ```
 
-Self-modifying language - builds itself through definitions.
+**Key Principle**: Nothing prints except `.`
+All operations push data. `.` detects type and renders.
+
+Self-modifying language with pure data semantics.
 
 See CHANGELOG.md for complete feature list.
 

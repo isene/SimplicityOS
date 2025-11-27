@@ -385,11 +385,31 @@ scancode_to_ascii:
 .check_semicolon:
     ; Semicolon/colon (scancode 0x27)
     cmp rbx, 0x27
-    jne .letters
+    jne .check_backtick
     mov rax, ';'
     cmp byte [shift_state], 0
     je .done
     mov rax, ':'
+    jmp .done
+
+.check_backtick:
+    ; Backtick/tilde (scancode 0x29)
+    cmp rbx, 0x29
+    jne .check_apostrophe
+    mov rax, 96             ; Backtick `
+    cmp byte [shift_state], 0
+    je .done
+    mov rax, 126            ; Tilde ~
+    jmp .done
+
+.check_apostrophe:
+    ; Apostrophe/quote (scancode 0x28)
+    cmp rbx, 0x28
+    jne .letters
+    mov rax, 39             ; Apostrophe '
+    cmp byte [shift_state], 0
+    je .done
+    mov rax, 34             ; Double quote "
     jmp .done
 
 .letters:
@@ -568,6 +588,14 @@ REPL:
     call skip_spaces
     cmp byte [rsi], 0
     je .line_done
+
+    ; Check for tick (~) - get reference to next word
+    cmp byte [rsi], 126     ; Tilde
+    je .handle_tick
+
+    ; Check for quote (") - string literal
+    cmp byte [rsi], 34      ; Double quote
+    je .handle_string
 
     ; Get word
     call parse_word         ; Returns word in RDI, length in RCX
@@ -748,12 +776,148 @@ REPL:
     call print_string
     jmp .line_done
 
+.handle_tick:
+    ; Tick - get reference to next word
+    inc rsi                 ; Skip apostrophe
+    call skip_spaces
+    call parse_word         ; Get the word name
+
+    ; Look it up
+    push rsi
+    call lookup_word
+    pop rsi
+
+    ; Push address to stack (the reference)
+    mov [r15], rax
+    add r15, 8
+    jmp .parse_loop
+
+.handle_string:
+    ; Create STRING object
+    inc rsi                 ; Skip opening quote
+
+    ; Count string length first
+    push rsi
+    xor rcx, rcx
+.count_loop:
+    mov al, [rsi]
+    test al, al
+    jz .count_done
+    cmp al, 34              ; Closing quote?
+    je .count_done
+    inc rsi
+    inc rcx
+    jmp .count_loop
+.count_done:
+    pop rsi
+
+    ; Allocate object: 16 bytes header + string + null
+    push rcx
+    add rcx, 17             ; Header(16) + null(1)
+    call allocate_object    ; Returns address in RAX
+    pop rcx
+
+    ; Fill object header
+    mov qword [rax], TYPE_STRING
+    mov [rax+8], rcx
+
+    ; Copy string data
+    lea rdi, [rax+16]
+.copy_loop:
+    mov bl, [rsi]
+    test bl, bl
+    jz .copy_done
+    inc rsi
+    cmp bl, 34
+    je .copy_done
+    mov [rdi], bl
+    inc rdi
+    jmp .copy_loop
+.copy_done:
+    mov byte [rdi], 0       ; Null terminate
+    inc rsi                 ; Skip closing quote
+
+    ; Push object reference to stack
+    mov [r15], rax
+    add r15, 8
+    jmp .parse_loop
+
 .line_done:
     mov rax, str_ok
     call print_string_gray
     call newline
 
     jmp .main_loop
+
+; Create STRING object from C string (RSI = null-terminated string)
+; Returns object address in RAX
+create_string_from_cstr:
+    push rbx
+    push rcx
+    push rdi
+    push rsi
+
+    ; Count string length
+    mov rdi, rsi
+    xor rcx, rcx
+.count:
+    cmp byte [rdi], 0
+    je .counted
+    inc rdi
+    inc rcx
+    jmp .count
+.counted:
+
+    ; Allocate object
+    push rcx
+    push rsi
+    add rcx, 17             ; Header + null
+    call allocate_object
+    pop rsi
+    pop rcx
+
+    ; Fill header
+    mov qword [rax], TYPE_STRING
+    mov [rax+8], rcx
+
+    ; Copy string
+    lea rdi, [rax+16]
+.copy:
+    mov bl, [rsi]
+    mov [rdi], bl
+    test bl, bl
+    jz .done
+    inc rsi
+    inc rdi
+    jmp .copy
+.done:
+
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rbx
+    ret
+
+; Allocate object (RCX = total size in bytes)
+; Returns address in RAX
+allocate_object:
+    push rbx
+    push rcx
+
+    ; Get current heap position
+    mov rax, [heap_ptr]
+
+    ; Align to 16 bytes
+    add rax, 15
+    and rax, ~15
+
+    ; Update heap pointer
+    add rcx, rax
+    mov [heap_ptr], rcx
+
+    pop rcx
+    pop rbx
+    ret
 
 ; DOCOL - Execute a colon definition
 ; Entry point for user-defined words
@@ -1108,6 +1272,8 @@ lookup_word:
     je .found_fetch
     cmp al, '!'
     je .found_store
+    cmp al, '?'
+    je .found_inspect
 
     jmp .check_multi
 
@@ -1137,6 +1303,9 @@ lookup_word:
     jmp .done
 .found_store:
     mov rax, word_store
+    jmp .done
+.found_inspect:
+    mov rax, word_inspect
     jmp .done
 
 .check_multi:
@@ -1338,15 +1507,46 @@ word_div:
 
 word_dot:
     sub r15, 8
-    mov rax, [r15]          ; Pop
+    mov rax, [r15]          ; Pop value
+
+    ; Check if immediate integer (< 0x100000)
+    cmp rax, 0x100000
+    jl .print_immediate
+
+    ; Object - check type
+    mov rbx, [rax]          ; Get type tag
+    cmp rbx, TYPE_STRING
+    je .print_string_obj
+    cmp rbx, TYPE_REF
+    je .print_ref_obj
+
+    ; Unknown type - print address
     call print_number
-    mov rbx, [cursor]
-    mov byte [rbx], ' '
-    mov byte [rbx+1], 0x0F
-    add rbx, 2
-    mov [cursor], rbx
-    call update_hw_cursor
+    jmp .dot_done
+
+.print_immediate:
+    call print_number
+    jmp .dot_done
+
+.print_string_obj:
+    ; Print string object data
+    lea rax, [rax+16]       ; Skip header to data
+    call print_string
+    jmp .dot_done
+
+.print_ref_obj:
+    ; Print ref as "(code)"
+    push rax
+    mov rax, str_code_obj
+    call print_string
+    pop rax
+    jmp .dot_done
+
+.dot_done:
+    ; No space after output - let user add it if needed
     ret
+
+str_code_obj: db '(code)', 0
 
 word_dots:
     ; Display stack: <depth> item1 item2 ...
@@ -1448,6 +1648,48 @@ word_store:
     mov rbx, [r15]          ; Pop value
     mov [rax], rbx          ; Store value at address
     ret
+
+word_inspect:
+    ; ? - Inspect reference, push STRING description
+    sub r15, 8
+    mov rax, [r15]          ; Pop reference
+
+    test rax, rax
+    jz .push_unknown
+
+    ; Check if dictionary or built-in
+    cmp rax, dictionary_space
+    jl .push_builtin
+
+    ; Dictionary word - create STRING "(colon)"
+    push rsi
+    mov rsi, str_colon_ref
+    call create_string_from_cstr
+    pop rsi
+    mov [r15], rax
+    add r15, 8
+    ret
+
+.push_builtin:
+    push rsi
+    mov rsi, str_builtin_ref
+    call create_string_from_cstr
+    pop rsi
+    mov [r15], rax
+    add r15, 8
+    ret
+
+.push_unknown:
+    push rsi
+    mov rsi, str_unknown
+    call create_string_from_cstr
+    pop rsi
+    mov [r15], rax
+    add r15, 8
+    ret
+
+str_colon_ref: db '(colon)', 0
+str_builtin_ref: db '(built-in)', 0
 
 word_words:
     ; List all dictionary words (traverse linked list)
@@ -1598,6 +1840,18 @@ dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)
 compile_buffer: times 256 dq 0  ; Compilation buffer
 compile_ptr: dq compile_buffer  ; Current compilation position
 new_word_name: times 32 db 0    ; Name of word being defined
+string_pool: times 2048 db 0    ; Temporary string pool
+string_here: dq string_pool     ; Next free space
+
+; Object model
+heap_start: dq 0x200000         ; Heap starts at 2MB
+heap_ptr: dq 0x200000           ; Current heap position
+
+; Type tags
+TYPE_INT equ 0
+TYPE_STRING equ 1
+TYPE_REF equ 2
+TYPE_ARRAY equ 3
 
 cursor: dq 0xB8000 + 160
 
