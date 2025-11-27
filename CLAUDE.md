@@ -38,17 +38,21 @@ Everything is a WORD. Hardware is directly composable.
 
 ### Register Conventions (DOCUMENTED)
 ```
-R15 = Forth data stack pointer (grows up: push = [R15], R15+=8)
+R14 = Top of stack (TOS) - Cached for performance
+R15 = Data stack pointer (second-on-stack and below)
 RBP = Return stack pointer (grows down: push = [RBP], RBP-=8)
 RSI = Instruction pointer during definition execution
 RSP = Machine stack (for function calls, preserved)
 
+Why TOS register: Reduces memory accesses, improves performance
+Stack layout: R14 = TOS, [R15-8] = second, [R15-16] = third, ...
+
 Scratch registers (caller-saved):
 RAX, RBX, RCX, RDX = Temporary, not preserved across operations
-R8-R13 = Available for complex operations
+R8, R9, R10, R11, R12, R13 = Available for complex operations
 
 Preserved across word calls:
-R15, RBP = Stack pointers (never corrupted)
+R14, R15, RBP = Stack pointers (never corrupted)
 RSI = Only modified during definition execution
 ```
 

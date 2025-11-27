@@ -529,7 +529,9 @@ REPL:
     call newline
 
     ; Initialize stacks
-    mov r15, forth_stack    ; Data stack
+    ; R15 points one past last item, R14 holds TOS
+    mov r15, forth_stack    ; Data stack base
+    mov r14, 0              ; Top of stack (TOS) - empty initially
     mov rbp, 0x70000        ; Return stack (grows down)
 
 .main_loop:
@@ -759,9 +761,11 @@ REPL:
     cmp byte [compile_mode], 0
     jne .compile_literal
 
-    ; Interpret mode - push to stack
-    mov [r15], rax          ; Push to Forth stack
+    ; Interpret mode - push to stack with TOS
+    ; Push old TOS to memory, new value becomes TOS
+    mov [r15], r14
     add r15, 8
+    mov r14, rax
     jmp .parse_loop
 
 .compile_literal:
@@ -791,9 +795,10 @@ REPL:
     call lookup_word
     pop rsi
 
-    ; Push address to stack (the reference)
-    mov [r15], rax
+    ; Push reference to TOS
+    mov [r15], r14
     add r15, 8
+    mov r14, rax
     jmp .parse_loop
 
 .handle_bracket:
@@ -824,9 +829,10 @@ REPL:
     pop rdi
     pop rsi
 
-    ; Push address of value slot
-    mov [r15], rax
+    ; Push address to TOS
+    mov [r15], r14
     add r15, 8
+    mov r14, rax
     jmp .parse_loop
 
 .handle_string:
@@ -874,9 +880,10 @@ REPL:
     mov byte [rdi], 0       ; Null terminate
     inc rsi                 ; Skip closing quote
 
-    ; Push object reference to stack
-    mov [r15], rax
+    ; Push object to TOS
+    mov [r15], r14
     add r15, 8
+    mov r14, rax
     jmp .parse_loop
 
 .line_done:
@@ -1028,9 +1035,10 @@ allocate_object:
     pop rbx
     ret
 
-; DOCOL - Execute a colon definition
-; Entry point for user-defined words
-; Expects definition body to start at address following this
+; DOCOL - Marker for colon-defined words (not executable code)
+; Why: Distinguishes user definitions from built-in words
+; Code field contains DOCOL, followed by definition body
+; Execution handled by .dict_word in REPL, not by calling this
 DOCOL:
     ; Get address of this call (return address on stack)
     pop rsi                 ; Return address = start of definition body
@@ -1650,45 +1658,38 @@ lookup_word:
 
 ; Word implementations for REPL (using R15 as Forth stack)
 word_plus:
+    ; Add: pop second, add to TOS (in R14)
     sub r15, 8
-    mov rax, [r15]          ; Pop
-    sub r15, 8
-    add [r15], rax          ; Add to TOS
-    add r15, 8
+    add r14, [r15]
     ret
 
 word_minus:
+    ; Subtract: second - TOS, result in TOS
     sub r15, 8
-    mov rax, [r15]          ; Pop
-    sub r15, 8
-    sub [r15], rax          ; Subtract from TOS
-    add r15, 8
+    mov rax, [r15]
+    sub rax, r14
+    mov r14, rax
     ret
 
 word_mult:
+    ; Multiply: second * TOS
     sub r15, 8
-    mov rax, [r15]          ; Pop
-    sub r15, 8
-    mov rbx, [r15]          ; Pop
-    imul rax, rbx
-    mov [r15], rax          ; Push
-    add r15, 8
+    imul r14, [r15]
     ret
 
 word_div:
+    ; Divide: second / TOS
     sub r15, 8
-    mov rbx, [r15]          ; Pop divisor
-    sub r15, 8
-    mov rax, [r15]          ; Pop dividend
+    mov rax, [r15]          ; Dividend (second)
+    mov rbx, r14            ; Divisor (TOS)
     xor rdx, rdx
     div rbx
-    mov [r15], rax          ; Push quotient
-    add r15, 8
+    mov r14, rax            ; Quotient becomes TOS
     ret
 
 word_dot:
-    sub r15, 8
-    mov rax, [r15]          ; Pop value
+    ; Print TOS and load new TOS
+    mov rax, r14
 
     ; Check if immediate integer (< 0x100000)
     cmp rax, 0x100000
@@ -1724,7 +1725,9 @@ word_dot:
     jmp .dot_done
 
 .dot_done:
-    ; No space after output - let user add it if needed
+    ; Load new TOS after printing
+    sub r15, 8
+    mov r14, [r15]
     ret
 
 str_code_obj: db '(code)', 0
@@ -1773,67 +1776,76 @@ word_dots:
     ret
 
 word_dup:
-    mov rax, [r15-8]        ; Get TOS
-    mov [r15], rax          ; Push copy
+    ; Duplicate TOS: push R14, R14 unchanged
+    mov [r15], r14
     add r15, 8
     ret
 
 word_drop:
-    sub r15, 8              ; Just decrement stack pointer
+    ; Drop TOS: load new TOS from stack
+    sub r15, 8
+    mov r14, [r15]
     ret
 
 word_swap:
-    mov rax, [r15-8]        ; Get TOS
-    mov rbx, [r15-16]       ; Get second
-    mov [r15-8], rbx        ; Swap
-    mov [r15-16], rax
-    ret
-
-word_rot:
-    mov rax, [r15-8]        ; c (TOS)
-    mov rbx, [r15-16]       ; b
-    mov rcx, [r15-24]       ; a
-    mov [r15-8], rcx        ; a on top
-    mov [r15-16], rax       ; c in middle
-    mov [r15-24], rbx       ; b at bottom
-    ret
-
-word_over:
-    mov rax, [r15-16]       ; Get second item
-    mov [r15], rax          ; Push copy
+    ; Swap TOS with second: exchange R14 and [R15-8]
+    sub r15, 8
+    xchg r14, [r15]
     add r15, 8
     ret
 
-word_emit:
+word_rot:
+    ; Rotate top 3: ( a b c -- b c a )
     sub r15, 8
-    mov rax, [r15]          ; Pop character
+    mov rax, [r15]          ; b
+    sub r15, 8
+    mov rbx, [r15]          ; a
+    mov [r15], rax          ; b
+    add r15, 8
+    mov [r15], r14          ; c
+    add r15, 8
+    mov r14, rbx            ; a becomes TOS
+    ret
+
+word_over:
+    ; Copy second to TOS: ( a b -- a b a )
+    mov [r15], r14          ; Push current TOS
+    add r15, 8
+    mov r14, [r15-16]       ; Second becomes new TOS
+    ret
+
+word_emit:
+    ; Emit character from TOS
+    mov rax, r14
     call emit_char
+    sub r15, 8
+    mov r14, [r15]          ; Load new TOS
     ret
 
 word_cr:
+    ; Newline (doesn't consume stack)
     call newline
     ret
 
 word_fetch:
-    sub r15, 8
-    mov rax, [r15]          ; Pop address
-    mov rax, [rax]          ; Fetch value at address
-    mov [r15], rax          ; Push value
-    add r15, 8
+    ; Fetch: TOS is address, replace with value at address
+    mov rax, [r14]
+    mov r14, rax
     ret
 
 word_store:
+    ; Store: ( value addr -- ) second=value, TOS=addr
+    mov rax, r14            ; Address
     sub r15, 8
-    mov rax, [r15]          ; Pop address
+    mov rbx, [r15]          ; Value
+    mov [rax], rbx
     sub r15, 8
-    mov rbx, [r15]          ; Pop value
-    mov [rax], rbx          ; Store value at address
+    mov r14, [r15]          ; New TOS
     ret
 
 word_inspect:
-    ; ? - Inspect reference, push STRING description
-    sub r15, 8
-    mov rax, [r15]          ; Pop reference
+    ; ? - Inspect reference from TOS, push STRING description
+    mov rax, r14            ; Get TOS reference
 
     test rax, rax
     jz .push_unknown
@@ -1847,8 +1859,10 @@ word_inspect:
     mov rsi, str_colon_ref
     call create_string_from_cstr
     pop rsi
-    mov [r15], rax
+    ; Push to TOS
+    mov [r15], r14
     add r15, 8
+    mov r14, rax
     ret
 
 .push_builtin:
@@ -1856,8 +1870,9 @@ word_inspect:
     mov rsi, str_builtin_ref
     call create_string_from_cstr
     pop rsi
-    mov [r15], rax
+    mov [r15], r14
     add r15, 8
+    mov r14, rax
     ret
 
 .push_unknown:
@@ -1865,17 +1880,21 @@ word_inspect:
     mov rsi, str_unknown
     call create_string_from_cstr
     pop rsi
-    mov [r15], rax
+    mov [r15], r14
     add r15, 8
+    mov r14, rax
     ret
 
 str_colon_ref: db '(colon)', 0
 str_builtin_ref: db '(built-in)', 0
 
 word_execute:
-    ; Execute code reference from stack
+    ; Execute code reference from TOS
+    mov rax, r14            ; Get reference from TOS
+
+    ; Load new TOS
     sub r15, 8
-    mov rax, [r15]          ; Pop reference
+    mov r14, [r15]
 
     ; Validate reference (check for null/invalid)
     test rax, rax
@@ -1923,21 +1942,19 @@ word_execute:
     ret
 
 .invalid_ref:
-    ; Push error STRING for invalid reference
+    ; Push error STRING for invalid reference (TOS model)
     push rsi
     mov rsi, str_invalid_ref
     call create_string_from_cstr
     pop rsi
-    mov [r15], rax
-    add r15, 8
+    mov r14, rax            ; Error STRING becomes TOS
     ret
 
 str_invalid_ref: db '(invalid reference)', 0
 
 word_array:
     ; Create ARRAY object ( size -- array )
-    sub r15, 8
-    mov rax, [r15]          ; Pop size
+    mov rax, r14            ; Size from TOS
 
     ; Allocate: header(16) + size*8 bytes
     push rax
@@ -1962,59 +1979,55 @@ word_array:
     jnz .zero_loop
     pop rax
 
-    ; Push array object
-    mov [r15], rax
-    add r15, 8
+    ; Push array object to TOS
+    mov r14, rax
     ret
 
 word_at:
-    ; Array access ( array index -- value )
+    ; Array access ( array index -- value ) TOS=index
+    mov rbx, r14            ; Index from TOS
     sub r15, 8
-    mov rbx, [r15]          ; Pop index
-    sub r15, 8
-    mov rax, [r15]          ; Pop array
+    mov rax, [r15]          ; Array from second
 
-    ; Get element address: array + 16 + (index * 8)
+    ; Get element: array[index]
     lea rax, [rax + 16 + rbx*8]
-    mov rax, [rax]
-
-    ; Push value
-    mov [r15], rax
-    add r15, 8
+    mov r14, [rax]          ; Value becomes TOS
     ret
 
 word_put:
-    ; Array store ( value array index -- )
+    ; Array store ( value array index -- ) TOS=index
+    mov rbx, r14            ; Index from TOS
     sub r15, 8
-    mov rbx, [r15]          ; Pop index
+    mov rcx, [r15]          ; Array from second
     sub r15, 8
-    mov rcx, [r15]          ; Pop array
-    sub r15, 8
-    mov rax, [r15]          ; Pop value
+    mov rax, [r15]          ; Value from third
 
     ; Store: array[index] = value
     lea rcx, [rcx + 16 + rbx*8]
     mov [rcx], rax
+
+    ; Load new TOS
+    sub r15, 8
+    mov r14, [r15]
     ret
 
 word_free:
-    ; Free object ( obj -- )
-    ; TODO: Implement proper free list
-    ; For now: stub (bump allocator can't free)
-    sub r15, 8              ; Pop and discard
+    ; Free object from TOS (stub - just drops it)
+    sub r15, 8
+    mov r14, [r15]
     ret
 
 word_words:
-    ; Create STRING listing all words (pure model - push, don't print)
-    ; For now, just push the built-in list as a STRING
-    ; TODO: Build dynamic string with user words prepended
+    ; Push STRING listing all words
     push rsi
     mov rsi, str_builtins
     call create_string_from_cstr
     pop rsi
 
-    mov [r15], rax
+    ; Push to TOS
+    mov [r15], r14
     add r15, 8
+    mov r14, rax
     ret
 
 str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~square ? words execute ', 0
