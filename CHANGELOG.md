@@ -1,5 +1,45 @@
 # Simplicity OS - Changelog
 
+## [0.12] - 2025-11-28 - User-Defined Types
+
+### New Feature - Type Lego System
+Build custom types from primitive pieces. Create your own data structures with named types.
+
+**New Words:**
+- `type-new` ( -- type_tag ) - Allocate a new type tag (4, 5, 6...)
+- `type-name` ( str type_tag -- ) - Associate a name with a type
+- `type-set` ( obj new_type -- obj ) - Change an object's type tag
+- `type-name?` ( type_tag -- str|0 ) - Get name STRING for a type
+
+**Example - Creating a Point Type:**
+```forth
+type-new                    ( -- 4 ) allocate type 4
+"point" 4 type-name         ( ) name it "point"
+: point { swap , , } 4 type-set ;  ( x y -- point )
+10 20 point .               ( ) prints [point: 10 20 ]
+```
+
+**Design Philosophy:**
+- Minimal primitives, maximum flexibility
+- User types are arrays with different type tags
+- No special syntax needed - pure Forth composition
+- `.` automatically displays type names
+- Supports up to 256 user-defined types
+
+### Technical Implementation
+- Type registry at type_registry (256 entries)
+- next_type_tag tracks allocation
+- Types 0-3 reserved (INT, STRING, REF, ARRAY)
+- User types start at TYPE_USER_BASE (4)
+- Enhanced word_dot with user type display
+
+### Enhanced Array Display
+- `.` now prints array contents: `[ 1 2 3 ]`
+- Nested objects shown as type indicators
+- User types show `[typename: data...]`
+
+---
+
 ## [0.11] - 2025-11-27 - Critical Stack Fix
 
 ### Bug Fix - Return Stack Memory Conflict

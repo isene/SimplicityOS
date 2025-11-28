@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.11-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.12-brightgreen.svg)](CHANGELOG.md)
 [![Size](https://img.shields.io/badge/size-1.3KB-red.svg)](#)
 
 Bare-metal x86_64 operating system built on Forth principles.
@@ -65,7 +65,8 @@ make debug
 - **Introspection** - words, see, forget
 - **Arrays** - `{ 1 2 3 }` literal syntax with nested support
 - **Type introspection** - `type` and `len` words
-- **Built-in words**: + - * / . .s dup drop swap rot over @ ! emit cr len type
+- **User-defined types** - Build custom types from primitives
+- **Built-in words**: + - * / . .s dup drop swap rot over @ ! emit cr len type type-new type-name type-set type-name?
 - Dictionary with linked list
 - Case-insensitive
 - ~11KB total
@@ -118,6 +119,19 @@ ok (ARRAY object pushed)
 ok (nested array with string, array, int)
 > .s
 <1> [ARRAY:3] ok (type-aware stack display)
+
+> type-new
+ok (allocates type 4)
+> .
+4 ok
+
+> "point" 4 type-name
+ok (names type 4 as "point")
+
+> { 10 20 } 4 type-set
+ok (creates point from array)
+> .
+[point: 10 20 ] ok (displays with type name)
 ```
 
 **Key Principle**: Nothing prints except `.`

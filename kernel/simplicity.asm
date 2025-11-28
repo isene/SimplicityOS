@@ -1734,6 +1734,92 @@ lookup_word:
 
 .try_type:
     cmp rcx, 4
+    jne .try_type_new
+    cmp byte [rdi], 't'
+    jne .try_type_new
+    cmp byte [rdi+1], 'y'
+    jne .try_type_new
+    cmp byte [rdi+2], 'p'
+    jne .try_type_new
+    cmp byte [rdi+3], 'e'
+    jne .try_type_new
+    mov rax, word_type
+    jmp .done
+
+.try_type_new:
+    ; type-new (8 chars)
+    cmp rcx, 8
+    jne .try_type_name
+    cmp byte [rdi], 't'
+    jne .try_type_name
+    cmp byte [rdi+1], 'y'
+    jne .try_type_name
+    cmp byte [rdi+2], 'p'
+    jne .try_type_name
+    cmp byte [rdi+3], 'e'
+    jne .try_type_name
+    cmp byte [rdi+4], '-'
+    jne .try_type_name
+    cmp byte [rdi+5], 'n'
+    jne .try_type_name
+    cmp byte [rdi+6], 'e'
+    jne .try_type_name
+    cmp byte [rdi+7], 'w'
+    jne .try_type_name
+    mov rax, word_type_new
+    jmp .done
+
+.try_type_name:
+    ; type-name (9 chars)
+    cmp rcx, 9
+    jne .try_type_set
+    cmp byte [rdi], 't'
+    jne .try_type_set
+    cmp byte [rdi+1], 'y'
+    jne .try_type_set
+    cmp byte [rdi+2], 'p'
+    jne .try_type_set
+    cmp byte [rdi+3], 'e'
+    jne .try_type_set
+    cmp byte [rdi+4], '-'
+    jne .try_type_set
+    cmp byte [rdi+5], 'n'
+    jne .try_type_set
+    cmp byte [rdi+6], 'a'
+    jne .try_type_set
+    cmp byte [rdi+7], 'm'
+    jne .try_type_set
+    cmp byte [rdi+8], 'e'
+    jne .try_type_set
+    mov rax, word_type_name
+    jmp .done
+
+.try_type_set:
+    ; type-set (8 chars)
+    cmp rcx, 8
+    jne .try_type_name_get
+    cmp byte [rdi], 't'
+    jne .try_type_name_get
+    cmp byte [rdi+1], 'y'
+    jne .try_type_name_get
+    cmp byte [rdi+2], 'p'
+    jne .try_type_name_get
+    cmp byte [rdi+3], 'e'
+    jne .try_type_name_get
+    cmp byte [rdi+4], '-'
+    jne .try_type_name_get
+    cmp byte [rdi+5], 's'
+    jne .try_type_name_get
+    cmp byte [rdi+6], 'e'
+    jne .try_type_name_get
+    cmp byte [rdi+7], 't'
+    jne .try_type_name_get
+    mov rax, word_type_set
+    jmp .done
+
+.try_type_name_get:
+    ; type-name? (10 chars)
+    cmp rcx, 10
     jne .not_found
     cmp byte [rdi], 't'
     jne .not_found
@@ -1743,7 +1829,19 @@ lookup_word:
     jne .not_found
     cmp byte [rdi+3], 'e'
     jne .not_found
-    mov rax, word_type
+    cmp byte [rdi+4], '-'
+    jne .not_found
+    cmp byte [rdi+5], 'n'
+    jne .not_found
+    cmp byte [rdi+6], 'a'
+    jne .not_found
+    cmp byte [rdi+7], 'm'
+    jne .not_found
+    cmp byte [rdi+8], 'e'
+    jne .not_found
+    cmp byte [rdi+9], '?'
+    jne .not_found
+    mov rax, word_type_name_get
     jmp .done
 
 .not_found:
@@ -1801,9 +1899,129 @@ word_dot:
     je .print_string_obj
     cmp rbx, TYPE_REF
     je .print_ref_obj
+    cmp rbx, TYPE_ARRAY
+    je .print_array_obj
+
+    ; Check for user-defined type
+    cmp rbx, TYPE_USER_BASE
+    jge .print_user_obj
 
     ; Unknown type - print address
     call print_number
+    jmp .dot_done
+
+.print_array_obj:
+    ; Print array contents: [ elem1 elem2 ... ]
+    push rax
+    mov al, '['
+    call emit_char
+    mov al, ' '
+    call emit_char
+    pop rax
+
+    ; Get count and print elements
+    push rax
+    mov rcx, [rax+8]        ; Count
+    lea rdi, [rax+16]       ; Data start
+.print_arr_loop:
+    test rcx, rcx
+    jz .print_arr_done
+    push rcx
+    push rdi
+    mov rax, [rdi]
+    ; Recursively print element (simplified - just number for now)
+    cmp rax, 0x100000
+    jl .arr_elem_int
+    ; Object element - print type tag
+    mov rbx, [rax]
+    push rax
+    mov al, '['
+    call emit_char
+    mov rax, rbx
+    call print_number
+    mov al, ']'
+    call emit_char
+    pop rax
+    jmp .arr_elem_done
+.arr_elem_int:
+    call print_number
+.arr_elem_done:
+    mov al, ' '
+    call emit_char
+    pop rdi
+    pop rcx
+    add rdi, 8
+    dec rcx
+    jmp .print_arr_loop
+.print_arr_done:
+    pop rax
+    mov al, ']'
+    call emit_char
+    jmp .dot_done
+
+.print_user_obj:
+    ; User type - print [typename: data...]
+    push rax
+    push rbx
+    mov al, '['
+    call emit_char
+
+    ; Get type name
+    mov rax, rbx
+    sub rax, TYPE_USER_BASE
+    mov rax, [type_registry + rax*8]
+    test rax, rax
+    jz .user_no_name
+
+    ; Print type name
+    lea rax, [rax+16]       ; String data
+    call print_string
+    jmp .user_after_name
+
+.user_no_name:
+    ; No name - print type number
+    pop rbx
+    push rbx
+    mov rax, rbx
+    call print_number
+
+.user_after_name:
+    mov al, ':'
+    call emit_char
+    mov al, ' '
+    call emit_char
+
+    ; Print array-like contents (user types are arrays with different tag)
+    pop rbx
+    pop rax
+    push rax
+    mov rcx, [rax+8]        ; Count/size
+    lea rdi, [rax+16]       ; Data start
+.user_print_loop:
+    test rcx, rcx
+    jz .user_print_done
+    push rcx
+    push rdi
+    mov rax, [rdi]
+    cmp rax, 0x100000
+    jl .user_elem_int
+    mov al, '.'
+    call emit_char
+    jmp .user_elem_done
+.user_elem_int:
+    call print_number
+.user_elem_done:
+    mov al, ' '
+    call emit_char
+    pop rdi
+    pop rcx
+    add rdi, 8
+    dec rcx
+    jmp .user_print_loop
+.user_print_done:
+    pop rax
+    mov al, ']'
+    call emit_char
     jmp .dot_done
 
 .print_immediate:
@@ -2304,7 +2522,7 @@ word_len:
 
 word_type:
     ; TYPE - Get type tag of value ( val -- type )
-    ; Returns: 0=INT, 1=STRING, 2=REF, 3=ARRAY
+    ; Returns: 0=INT, 1=STRING, 2=REF, 3=ARRAY, 4+=user
     mov rax, r14
 
     ; Check if immediate integer
@@ -2318,6 +2536,163 @@ word_type:
 .type_int:
     xor r14, r14              ; TYPE_INT = 0
     ret
+
+word_type_new:
+    ; TYPE-NEW - Allocate a new type tag ( -- type_tag )
+    ; Returns next available type tag and increments counter
+    push rax
+
+    ; Get current tag
+    mov rax, [next_type_tag]
+
+    ; Push to TOS
+    cmp r15, forth_stack
+    je .tn_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, rax
+    jmp .tn_done
+.tn_first:
+    mov r14, rax
+    add r15, 8
+.tn_done:
+    ; Increment for next allocation
+    inc qword [next_type_tag]
+
+    pop rax
+    ret
+
+word_type_name:
+    ; TYPE-NAME - Associate name with type ( str type_tag -- )
+    ; str must be a STRING object, type_tag is the type number
+    ; Stack: ... str type_tag (R14=type_tag, [R15-8]=str)
+    mov rbx, r14            ; RBX = type_tag
+    mov rax, [r15-8]        ; RAX = str (second item)
+
+    ; Validate type_tag >= TYPE_USER_BASE
+    cmp rbx, TYPE_USER_BASE
+    jl .tn_invalid
+
+    ; Calculate registry index
+    sub rbx, TYPE_USER_BASE
+    cmp rbx, 256
+    jge .tn_invalid
+
+    ; Store name STRING in registry
+    lea rcx, [type_registry + rbx*8]
+    mov [rcx], rax
+
+    ; Pop both items
+    sub r15, 8              ; Popped type_tag (was TOS)
+    sub r15, 8              ; Popped str
+    cmp r15, forth_stack
+    jle .tn_empty
+    mov r14, [r15-8]        ; Load new TOS
+    ret
+
+.tn_empty:
+    mov r15, forth_stack
+    xor r14, r14
+    ret
+
+.tn_invalid:
+    ; Invalid type tag - just clean stack
+    sub r15, 16
+    cmp r15, forth_stack
+    jle .tn_empty
+    mov r14, [r15-8]
+    ret
+
+word_type_set:
+    ; TYPE-SET - Change object's type tag ( obj new_type -- obj )
+    ; Returns same object with modified type
+    mov rax, r14            ; new_type from TOS
+    mov rbx, [r15-8]        ; obj from second
+
+    ; Validate obj is actually an object (not immediate)
+    cmp rbx, 0x100000
+    jl .ts_invalid
+
+    ; Set new type in object header
+    mov [rbx], rax
+
+    ; Pop type, keep obj as TOS
+    sub r15, 8
+    mov r14, rbx
+    ret
+
+.ts_invalid:
+    ; Can't set type on immediate - return obj unchanged
+    sub r15, 8
+    mov r14, rbx
+    ret
+
+word_type_name_get:
+    ; TYPE-NAME? - Get type name ( type_tag -- str|0 )
+    ; Returns STRING name or 0 if unnamed
+    mov rax, r14            ; type_tag
+
+    ; Check built-in types first
+    cmp rax, TYPE_INT
+    je .tng_int
+    cmp rax, TYPE_STRING
+    je .tng_string
+    cmp rax, TYPE_REF
+    je .tng_ref
+    cmp rax, TYPE_ARRAY
+    je .tng_array
+
+    ; User type - look up in registry
+    cmp rax, TYPE_USER_BASE
+    jl .tng_unknown
+    sub rax, TYPE_USER_BASE
+    cmp rax, 256
+    jge .tng_unknown
+
+    ; Get name from registry
+    mov r14, [type_registry + rax*8]
+    ret
+
+.tng_int:
+    push rsi
+    mov rsi, str_type_int
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
+    ret
+
+.tng_string:
+    push rsi
+    mov rsi, str_type_string
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
+    ret
+
+.tng_ref:
+    push rsi
+    mov rsi, str_type_ref
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
+    ret
+
+.tng_array:
+    push rsi
+    mov rsi, str_type_array
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
+    ret
+
+.tng_unknown:
+    xor r14, r14            ; Return 0 for unknown
+    ret
+
+str_type_int: db 'int', 0
+str_type_string: db 'string', 0
+str_type_ref: db 'ref', 0
+str_type_array: db 'array', 0
 
 word_screen_get:
     ; SCREEN-GET - Query VGA text mode parameters
@@ -2379,7 +2754,7 @@ word_words:
     mov r14, rax
     ret
 
-str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute screen-get len type array at put { } ', 0
+str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute screen-get len type array at put { } type-new type-name type-set type-name? ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word
@@ -2486,6 +2861,13 @@ TYPE_INT equ 0
 TYPE_STRING equ 1
 TYPE_REF equ 2
 TYPE_ARRAY equ 3
+TYPE_USER_BASE equ 4            ; User types start at 4
+
+; Type registry (for user-defined types)
+; Each entry: [name_ptr:8] - pointer to STRING object with type name
+; Index = type_tag - TYPE_USER_BASE
+type_registry: times 256 dq 0   ; Up to 256 user types
+next_type_tag: dq TYPE_USER_BASE ; Next available type tag
 
 ; Named variables namespace (simple linear list)
 named_vars: times 1024 dq 0     ; 128 variable slots (name_hash, value)

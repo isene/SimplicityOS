@@ -73,9 +73,24 @@ RSI = Only modified during definition execution
 TYPE_INT = 0        (immediate, no header, value < 0x100000)
 TYPE_STRING = 1     (null-terminated text)
 TYPE_REF = 2        (execution token)
-TYPE_ARRAY = 3      (future)
-TYPE_IMAGE = 4      (future)
-TYPE_APP = 5        (future)
+TYPE_ARRAY = 3      (count + elements)
+TYPE_USER_BASE = 4  (user-defined types start here)
+```
+
+**User-Defined Types:**
+- `type-new` allocates next available tag (4, 5, 6...)
+- `type-name` associates a STRING name with a tag
+- `type-set` changes an object's type tag
+- User types are structurally arrays with different type tags
+- `.` displays `[typename: data...]` for named user types
+- Up to 256 user-defined types supported
+
+**Creating Custom Types:**
+```forth
+type-new                        ( -- 4 )
+"point" 4 type-name             ( )
+: point { swap , , } 4 type-set ; ( x y -- point )
+10 20 point .                   ( ) [point: 10 20 ]
 ```
 
 ## Design Constraints
