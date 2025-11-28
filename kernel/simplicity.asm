@@ -911,9 +911,10 @@ REPL:
 .check_empty:
     cmp r15, rbx
     je .push_first
-    ; Stack has items - save old TOS to memory at index (depth-1)
-    ; mem[depth-1] = mem[(R15-stack_base)/8 - 1] = [R15-8]
-    mov [r15-8], r14
+    ; Stack has items - save old TOS to memory, then set new TOS
+    ; Convention: R15 points to next free slot, items at [R15-8], [R15-16], ...
+    ; Save old TOS at [R15], increment R15, set new TOS
+    mov [r15], r14
     add r15, 8
     mov r14, rax
     jmp .parse_loop
@@ -3032,7 +3033,8 @@ word_dots:
     dec rcx                 ; Memory items = depth - 1
     jz .print_tos           ; If was depth 1, skip to TOS
 
-    mov rdi, r8             ; Use correct stack base
+    ; Items stored at [base+8], [base+16], ..., [R15-8]
+    lea rdi, [r8 + 8]       ; Start at base + 8 (first stored item)
 .loop:
     mov rax, [rdi]
     call print_value_typed
