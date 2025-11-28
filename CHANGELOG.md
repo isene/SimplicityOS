@@ -1,5 +1,37 @@
 # Simplicity OS - Changelog
 
+## [0.14] - 2025-11-28 - Keyboard Enhancements
+
+### New Feature - Advanced Keyboard Input
+Support for special keys and non-blocking input for interactive applications.
+
+**New Words:**
+- `key?` ( -- key|0 ) - Non-blocking key check, returns 0 if no key
+- `key-escape` ( -- 256 ) - Escape key constant
+- `key-up` ( -- 257 ) - Up arrow constant
+- `key-down` ( -- 258 ) - Down arrow constant
+- `key-left` ( -- 259 ) - Left arrow constant
+- `key-right` ( -- 260 ) - Right arrow constant
+
+**Special Keys Supported:**
+- Arrow keys (up, down, left, right)
+- Escape key
+- Home, End, Page Up, Page Down, Delete
+- Ctrl+letter combinations (Ctrl+A = 1, Ctrl+Z = 26)
+
+**Example - Simple Key Handler:**
+```forth
+: handle-key
+  key?
+  dup 0 = if drop exit then
+  dup key-escape = if "Escape!" . drop exit then
+  dup key-up = if "Up!" . drop exit then
+  emit
+;
+```
+
+---
+
 ## [0.13] - 2025-11-28 - Screen Primitives
 
 ### New Feature - VGA Screen Control

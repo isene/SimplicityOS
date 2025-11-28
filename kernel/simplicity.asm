@@ -247,7 +247,8 @@ update_hw_cursor:
     pop rax
     ret
 
-; Wait for keypress and return ASCII in RAX
+; Wait for keypress and return key code in RAX
+; Returns: ASCII for normal keys, or special codes (KEY_UP, KEY_DOWN, etc.)
 wait_key:
     push rbx
 .wait:
@@ -269,12 +270,50 @@ wait_key:
     cmp al, 0xB6            ; Right shift release
     je .shift_release
 
+    ; Check for ctrl key
+    cmp al, 0x1D            ; Ctrl press
+    je .ctrl_press
+    cmp al, 0x9D            ; Ctrl release
+    je .ctrl_release
+
     ; Ignore other key releases (bit 7 set)
     test al, 0x80
     jnz .wait
 
+    ; Check for special keys (arrow keys, escape, etc.)
+    cmp al, 0x01            ; Escape
+    je .key_escape
+    cmp al, 0x48            ; Up arrow
+    je .key_up
+    cmp al, 0x50            ; Down arrow
+    je .key_down
+    cmp al, 0x4B            ; Left arrow
+    je .key_left
+    cmp al, 0x4D            ; Right arrow
+    je .key_right
+    cmp al, 0x47            ; Home
+    je .key_home
+    cmp al, 0x4F            ; End
+    je .key_end
+    cmp al, 0x49            ; Page Up
+    je .key_pgup
+    cmp al, 0x51            ; Page Down
+    je .key_pgdn
+    cmp al, 0x53            ; Delete
+    je .key_delete
+
     ; Convert scancode to ASCII
     call scancode_to_ascii
+
+    ; Apply ctrl modifier (Ctrl+A = 1, Ctrl+B = 2, etc.)
+    cmp byte [ctrl_state], 0
+    je .no_ctrl
+    cmp rax, 'a'
+    jl .no_ctrl
+    cmp rax, 'z'
+    jg .no_ctrl
+    sub rax, 96             ; 'a' -> 1, 'b' -> 2, etc.
+.no_ctrl:
 
     ; If zero (unmapped key), ignore it
     test rax, rax
@@ -290,6 +329,194 @@ wait_key:
 .shift_release:
     mov byte [shift_state], 0
     jmp .wait
+
+.ctrl_press:
+    mov byte [ctrl_state], 1
+    jmp .wait
+
+.ctrl_release:
+    mov byte [ctrl_state], 0
+    jmp .wait
+
+.key_escape:
+    mov rax, KEY_ESCAPE
+    pop rbx
+    ret
+
+.key_up:
+    mov rax, KEY_UP
+    pop rbx
+    ret
+
+.key_down:
+    mov rax, KEY_DOWN
+    pop rbx
+    ret
+
+.key_left:
+    mov rax, KEY_LEFT
+    pop rbx
+    ret
+
+.key_right:
+    mov rax, KEY_RIGHT
+    pop rbx
+    ret
+
+.key_home:
+    mov rax, KEY_HOME
+    pop rbx
+    ret
+
+.key_end:
+    mov rax, KEY_END
+    pop rbx
+    ret
+
+.key_pgup:
+    mov rax, KEY_PGUP
+    pop rbx
+    ret
+
+.key_pgdn:
+    mov rax, KEY_PGDN
+    pop rbx
+    ret
+
+.key_delete:
+    mov rax, KEY_DELETE
+    pop rbx
+    ret
+
+; Check if key available without blocking
+; Returns: key code in RAX, or 0 if no key
+check_key:
+    push rbx
+
+    ; Check if key available
+    in al, 0x64
+    test al, 1
+    jz .no_key
+
+    ; Read scancode
+    in al, 0x60
+
+    ; Handle shift/ctrl state changes
+    cmp al, 0x2A
+    je .ck_shift_press
+    cmp al, 0x36
+    je .ck_shift_press
+    cmp al, 0xAA
+    je .ck_shift_release
+    cmp al, 0xB6
+    je .ck_shift_release
+    cmp al, 0x1D
+    je .ck_ctrl_press
+    cmp al, 0x9D
+    je .ck_ctrl_release
+
+    ; Ignore releases
+    test al, 0x80
+    jnz .no_key
+
+    ; Check special keys
+    cmp al, 0x01
+    je .ck_escape
+    cmp al, 0x48
+    je .ck_up
+    cmp al, 0x50
+    je .ck_down
+    cmp al, 0x4B
+    je .ck_left
+    cmp al, 0x4D
+    je .ck_right
+    cmp al, 0x47
+    je .ck_home
+    cmp al, 0x4F
+    je .ck_end
+    cmp al, 0x49
+    je .ck_pgup
+    cmp al, 0x51
+    je .ck_pgdn
+    cmp al, 0x53
+    je .ck_delete
+
+    ; Normal key
+    call scancode_to_ascii
+
+    ; Apply ctrl
+    cmp byte [ctrl_state], 0
+    je .ck_done
+    cmp rax, 'a'
+    jl .ck_done
+    cmp rax, 'z'
+    jg .ck_done
+    sub rax, 96
+
+.ck_done:
+    pop rbx
+    ret
+
+.no_key:
+    xor rax, rax
+    pop rbx
+    ret
+
+.ck_shift_press:
+    mov byte [shift_state], 1
+    jmp .no_key
+.ck_shift_release:
+    mov byte [shift_state], 0
+    jmp .no_key
+.ck_ctrl_press:
+    mov byte [ctrl_state], 1
+    jmp .no_key
+.ck_ctrl_release:
+    mov byte [ctrl_state], 0
+    jmp .no_key
+
+.ck_escape:
+    mov rax, KEY_ESCAPE
+    jmp .ck_done
+.ck_up:
+    mov rax, KEY_UP
+    jmp .ck_done
+.ck_down:
+    mov rax, KEY_DOWN
+    jmp .ck_done
+.ck_left:
+    mov rax, KEY_LEFT
+    jmp .ck_done
+.ck_right:
+    mov rax, KEY_RIGHT
+    jmp .ck_done
+.ck_home:
+    mov rax, KEY_HOME
+    jmp .ck_done
+.ck_end:
+    mov rax, KEY_END
+    jmp .ck_done
+.ck_pgup:
+    mov rax, KEY_PGUP
+    jmp .ck_done
+.ck_pgdn:
+    mov rax, KEY_PGDN
+    jmp .ck_done
+.ck_delete:
+    mov rax, KEY_DELETE
+    jmp .ck_done
+
+; Special key codes (above ASCII range)
+KEY_ESCAPE equ 256
+KEY_UP     equ 257
+KEY_DOWN   equ 258
+KEY_LEFT   equ 259
+KEY_RIGHT  equ 260
+KEY_HOME   equ 261
+KEY_END    equ 262
+KEY_PGUP   equ 263
+KEY_PGDN   equ 264
+KEY_DELETE equ 265
 
 ; Convert scancode to ASCII using direct table lookup
 ; Why: Faster than jump chain, cleaner code
@@ -1882,28 +2109,160 @@ lookup_word:
 .try_type_name_get:
     ; type-name? (10 chars)
     cmp rcx, 10
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi], 't'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+1], 'y'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+2], 'p'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+3], 'e'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+4], '-'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+5], 'n'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+6], 'a'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+7], 'm'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+8], 'e'
-    jne .not_found
+    jne .try_key_check
     cmp byte [rdi+9], '?'
-    jne .not_found
+    jne .try_key_check
     mov rax, word_type_name_get
+    jmp .done
+
+.try_key_check:
+    ; key? (4 chars)
+    cmp rcx, 4
+    jne .try_key_escape
+    cmp byte [rdi], 'k'
+    jne .try_key_escape
+    cmp byte [rdi+1], 'e'
+    jne .try_key_escape
+    cmp byte [rdi+2], 'y'
+    jne .try_key_escape
+    cmp byte [rdi+3], '?'
+    jne .try_key_escape
+    mov rax, word_key_check
+    jmp .done
+
+.try_key_escape:
+    ; key-escape (10 chars)
+    cmp rcx, 10
+    jne .try_key_up
+    cmp byte [rdi], 'k'
+    jne .try_key_up
+    cmp byte [rdi+1], 'e'
+    jne .try_key_up
+    cmp byte [rdi+2], 'y'
+    jne .try_key_up
+    cmp byte [rdi+3], '-'
+    jne .try_key_up
+    cmp byte [rdi+4], 'e'
+    jne .try_key_up
+    cmp byte [rdi+5], 's'
+    jne .try_key_up
+    cmp byte [rdi+6], 'c'
+    jne .try_key_up
+    cmp byte [rdi+7], 'a'
+    jne .try_key_up
+    cmp byte [rdi+8], 'p'
+    jne .try_key_up
+    cmp byte [rdi+9], 'e'
+    jne .try_key_up
+    mov rax, word_key_escape
+    jmp .done
+
+.try_key_up:
+    ; key-up (6 chars)
+    cmp rcx, 6
+    jne .try_key_down
+    cmp byte [rdi], 'k'
+    jne .try_key_down
+    cmp byte [rdi+1], 'e'
+    jne .try_key_down
+    cmp byte [rdi+2], 'y'
+    jne .try_key_down
+    cmp byte [rdi+3], '-'
+    jne .try_key_down
+    cmp byte [rdi+4], 'u'
+    jne .try_key_down
+    cmp byte [rdi+5], 'p'
+    jne .try_key_down
+    mov rax, word_key_up
+    jmp .done
+
+.try_key_down:
+    ; key-down (8 chars)
+    cmp rcx, 8
+    jne .try_key_left
+    cmp byte [rdi], 'k'
+    jne .try_key_left
+    cmp byte [rdi+1], 'e'
+    jne .try_key_left
+    cmp byte [rdi+2], 'y'
+    jne .try_key_left
+    cmp byte [rdi+3], '-'
+    jne .try_key_left
+    cmp byte [rdi+4], 'd'
+    jne .try_key_left
+    cmp byte [rdi+5], 'o'
+    jne .try_key_left
+    cmp byte [rdi+6], 'w'
+    jne .try_key_left
+    cmp byte [rdi+7], 'n'
+    jne .try_key_left
+    mov rax, word_key_down
+    jmp .done
+
+.try_key_left:
+    ; key-left (8 chars)
+    cmp rcx, 8
+    jne .try_key_right
+    cmp byte [rdi], 'k'
+    jne .try_key_right
+    cmp byte [rdi+1], 'e'
+    jne .try_key_right
+    cmp byte [rdi+2], 'y'
+    jne .try_key_right
+    cmp byte [rdi+3], '-'
+    jne .try_key_right
+    cmp byte [rdi+4], 'l'
+    jne .try_key_right
+    cmp byte [rdi+5], 'e'
+    jne .try_key_right
+    cmp byte [rdi+6], 'f'
+    jne .try_key_right
+    cmp byte [rdi+7], 't'
+    jne .try_key_right
+    mov rax, word_key_left
+    jmp .done
+
+.try_key_right:
+    ; key-right (9 chars)
+    cmp rcx, 9
+    jne .not_found
+    cmp byte [rdi], 'k'
+    jne .not_found
+    cmp byte [rdi+1], 'e'
+    jne .not_found
+    cmp byte [rdi+2], 'y'
+    jne .not_found
+    cmp byte [rdi+3], '-'
+    jne .not_found
+    cmp byte [rdi+4], 'r'
+    jne .not_found
+    cmp byte [rdi+5], 'i'
+    jne .not_found
+    cmp byte [rdi+6], 'g'
+    jne .not_found
+    cmp byte [rdi+7], 'h'
+    jne .not_found
+    cmp byte [rdi+8], 't'
+    jne .not_found
+    mov rax, word_key_right
     jmp .done
 
 .not_found:
@@ -2975,6 +3334,87 @@ word_screen_scroll:
     xor r14, r14
     ret
 
+word_key_check:
+    ; KEY? - Check if key available, return key or 0 ( -- key|0 )
+    call check_key
+
+    ; Push to TOS
+    cmp r15, forth_stack
+    je .kc_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, rax
+    ret
+.kc_first:
+    mov r14, rax
+    add r15, 8
+    ret
+
+word_key_escape:
+    ; KEY-ESCAPE - Push escape key constant ( -- 256 )
+    cmp r15, forth_stack
+    je .ke_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, KEY_ESCAPE
+    ret
+.ke_first:
+    mov r14, KEY_ESCAPE
+    add r15, 8
+    ret
+
+word_key_up:
+    ; KEY-UP - Push up arrow constant ( -- 257 )
+    cmp r15, forth_stack
+    je .ku_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, KEY_UP
+    ret
+.ku_first:
+    mov r14, KEY_UP
+    add r15, 8
+    ret
+
+word_key_down:
+    ; KEY-DOWN - Push down arrow constant ( -- 258 )
+    cmp r15, forth_stack
+    je .kd_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, KEY_DOWN
+    ret
+.kd_first:
+    mov r14, KEY_DOWN
+    add r15, 8
+    ret
+
+word_key_left:
+    ; KEY-LEFT - Push left arrow constant ( -- 259 )
+    cmp r15, forth_stack
+    je .kl_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, KEY_LEFT
+    ret
+.kl_first:
+    mov r14, KEY_LEFT
+    add r15, 8
+    ret
+
+word_key_right:
+    ; KEY-RIGHT - Push right arrow constant ( -- 260 )
+    cmp r15, forth_stack
+    je .kr_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, KEY_RIGHT
+    ret
+.kr_first:
+    mov r14, KEY_RIGHT
+    add r15, 8
+    ret
+
 word_words:
     ; Push STRING listing all words
     push rsi
@@ -2988,7 +3428,7 @@ word_words:
     mov r14, rax
     ret
 
-str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-get screen-set screen-char screen-clear screen-scroll ', 0
+str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-get screen-set screen-char screen-clear screen-scroll key? key-escape key-up key-down key-left key-right ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word
@@ -3076,6 +3516,7 @@ str_unknown: db ' ?', 0
 
 input_buffer: times 80 db 0
 shift_state: db 0
+ctrl_state: db 0
 forth_stack: times 64 dq 0      ; Forth data stack (64 cells)
 compile_mode: db 0              ; 0 = interpret, 1 = compile
 dict_here: dq dictionary_space  ; Next free space in dictionary
