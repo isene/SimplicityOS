@@ -2565,9 +2565,13 @@ word_type_new:
 word_type_name:
     ; TYPE-NAME - Associate name with type ( str type_tag -- )
     ; str must be a STRING object, type_tag is the type number
-    ; Stack: ... str type_tag (R14=type_tag, [R15-8]=str)
+    ; Stack before: ... str type_tag (R14=type_tag)
+    ; Memory layout: [forth_stack]=str (depth 2, R15=forth_stack+16)
     mov rbx, r14            ; RBX = type_tag
-    mov rax, [r15-8]        ; RAX = str (second item)
+
+    ; Pop type_tag, get str
+    sub r15, 8              ; Pop type_tag (R15 now = forth_stack + 8)
+    mov rax, [r15-8]        ; RAX = str at [forth_stack + 0]
 
     ; Validate type_tag >= TYPE_USER_BASE
     cmp rbx, TYPE_USER_BASE
@@ -2582,12 +2586,11 @@ word_type_name:
     lea rcx, [type_registry + rbx*8]
     mov [rcx], rax
 
-    ; Pop both items
-    sub r15, 8              ; Popped type_tag (was TOS)
-    sub r15, 8              ; Popped str
+    ; Pop str, load new TOS
+    sub r15, 8
     cmp r15, forth_stack
     jle .tn_empty
-    mov r14, [r15-8]        ; Load new TOS
+    mov r14, [r15-8]        ; Load new TOS from memory
     ret
 
 .tn_empty:
@@ -2596,8 +2599,8 @@ word_type_name:
     ret
 
 .tn_invalid:
-    ; Invalid type tag - just clean stack
-    sub r15, 16
+    ; Invalid type tag - just clean stack (pop both)
+    sub r15, 8              ; Already decremented once, decrement again
     cmp r15, forth_stack
     jle .tn_empty
     mov r14, [r15-8]

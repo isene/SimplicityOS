@@ -132,6 +132,44 @@ ok (names type 4 as "point")
 ok (creates point from array)
 > .
 [point: 10 20 ] ok (displays with type name)
+
+> 4 type-name? .
+point ok (retrieves type name)
+```
+
+**Building a Complete Type System:**
+```forth
+( Define a 2D point type )
+> type-new
+ok
+> .
+4 ok
+> "point" 4 type-name
+ok
+
+( Create point constructor )
+> : point { rot rot } 4 type-set ;
+ok
+
+( Use it )
+> 100 200 point
+ok
+> .
+[point: 100 200 ] ok
+
+( Define a rectangle using two points )
+> type-new
+ok
+> "rect" 5 type-name
+ok
+> : rect { rot rot } 5 type-set ;
+ok
+
+( Create rectangle from two points )
+> 0 0 point 100 50 point rect
+ok
+> .
+[rect: . . ] ok (contains two point objects)
 ```
 
 **Key Principle**: Nothing prints except `.`
