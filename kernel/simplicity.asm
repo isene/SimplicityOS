@@ -2528,19 +2528,117 @@ lookup_word:
 .try_again:
     ; again (5 chars) - IMMEDIATE
     cmp rcx, 5
+    jne .try_app_enter
+    cmp byte [rdi], 'a'
+    jne .try_app_enter
+    cmp byte [rdi+1], 'g'
+    jne .try_app_enter
+    cmp byte [rdi+2], 'a'
+    jne .try_app_enter
+    cmp byte [rdi+3], 'i'
+    jne .try_app_enter
+    cmp byte [rdi+4], 'n'
+    jne .try_app_enter
+    mov rax, word_again
+    jmp .done_immediate
+
+.try_app_enter:
+    ; app-enter (9 chars)
+    cmp rcx, 9
+    jne .try_app_exit
+    cmp byte [rdi], 'a'
+    jne .try_app_exit
+    cmp byte [rdi+1], 'p'
+    jne .try_app_exit
+    cmp byte [rdi+2], 'p'
+    jne .try_app_exit
+    cmp byte [rdi+3], '-'
+    jne .try_app_exit
+    cmp byte [rdi+4], 'e'
+    jne .try_app_exit
+    cmp byte [rdi+5], 'n'
+    jne .try_app_exit
+    cmp byte [rdi+6], 't'
+    jne .try_app_exit
+    cmp byte [rdi+7], 'e'
+    jne .try_app_exit
+    cmp byte [rdi+8], 'r'
+    jne .try_app_exit
+    mov rax, word_app_enter
+    jmp .done
+
+.try_app_exit:
+    ; app-exit (8 chars)
+    cmp rcx, 8
+    jne .try_app_stack
+    cmp byte [rdi], 'a'
+    jne .try_app_stack
+    cmp byte [rdi+1], 'p'
+    jne .try_app_stack
+    cmp byte [rdi+2], 'p'
+    jne .try_app_stack
+    cmp byte [rdi+3], '-'
+    jne .try_app_stack
+    cmp byte [rdi+4], 'e'
+    jne .try_app_stack
+    cmp byte [rdi+5], 'x'
+    jne .try_app_stack
+    cmp byte [rdi+6], 'i'
+    jne .try_app_stack
+    cmp byte [rdi+7], 't'
+    jne .try_app_stack
+    mov rax, word_app_exit
+    jmp .done
+
+.try_app_stack:
+    ; app-stack (9 chars)
+    cmp rcx, 9
+    jne .try_app_depth
+    cmp byte [rdi], 'a'
+    jne .try_app_depth
+    cmp byte [rdi+1], 'p'
+    jne .try_app_depth
+    cmp byte [rdi+2], 'p'
+    jne .try_app_depth
+    cmp byte [rdi+3], '-'
+    jne .try_app_depth
+    cmp byte [rdi+4], 's'
+    jne .try_app_depth
+    cmp byte [rdi+5], 't'
+    jne .try_app_depth
+    cmp byte [rdi+6], 'a'
+    jne .try_app_depth
+    cmp byte [rdi+7], 'c'
+    jne .try_app_depth
+    cmp byte [rdi+8], 'k'
+    jne .try_app_depth
+    mov rax, word_app_stack
+    jmp .done
+
+.try_app_depth:
+    ; app-depth (9 chars)
+    cmp rcx, 9
     jne .not_found
     cmp byte [rdi], 'a'
     jne .not_found
-    cmp byte [rdi+1], 'g'
+    cmp byte [rdi+1], 'p'
     jne .not_found
-    cmp byte [rdi+2], 'a'
+    cmp byte [rdi+2], 'p'
     jne .not_found
-    cmp byte [rdi+3], 'i'
+    cmp byte [rdi+3], '-'
     jne .not_found
-    cmp byte [rdi+4], 'n'
+    cmp byte [rdi+4], 'd'
     jne .not_found
-    mov rax, word_again
-    jmp .done_immediate
+    cmp byte [rdi+5], 'e'
+    jne .not_found
+    cmp byte [rdi+6], 'p'
+    jne .not_found
+    cmp byte [rdi+7], 't'
+    jne .not_found
+    cmp byte [rdi+8], 'h'
+    jne .not_found
+    mov rax, word_app_depth
+    jmp .done
 
 .done_immediate:
     ; Mark as immediate by setting high bit (bit 63)
@@ -4034,6 +4132,99 @@ word_again:
 .again_error:
     ret
 
+; App stack isolation words
+; Allow apps to run with their own isolated stack context
+
+word_app_enter:
+    ; APP-ENTER - Save current stack, start fresh app stack ( -- )
+    ; Saves R14 (TOS), R15 (stack ptr) to app_saved_*
+    ; Sets up fresh stack at app_stack for the app to use
+
+    ; Save current stack state
+    mov [app_saved_tos], r14
+    mov [app_saved_sp], r15
+    mov qword [app_active], 1
+
+    ; Set up fresh app stack
+    mov r15, app_stack
+    xor r14, r14                ; Empty TOS
+    ret
+
+word_app_exit:
+    ; APP-EXIT - Restore saved stack, return to REPL ( -- )
+    ; Restores R14, R15 from saved state
+
+    ; Check if we're in an app
+    cmp qword [app_active], 0
+    je .not_in_app
+
+    ; Restore saved stack state
+    mov r14, [app_saved_tos]
+    mov r15, [app_saved_sp]
+    mov qword [app_active], 0
+    ret
+
+.not_in_app:
+    ; Not in app - push error string
+    push rsi
+    mov rsi, str_not_in_app
+    call create_string_from_cstr
+    pop rsi
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    ret
+
+word_app_stack:
+    ; APP-STACK - Push current stack base address ( -- addr )
+    ; Returns app_stack if in app, forth_stack otherwise
+
+    mov rax, forth_stack
+    cmp qword [app_active], 0
+    je .use_main
+    mov rax, app_stack
+.use_main:
+    ; Push to TOS
+    cmp r15, forth_stack
+    je .as_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, rax
+    ret
+.as_first:
+    mov r14, rax
+    add r15, 8
+    ret
+
+word_app_depth:
+    ; APP-DEPTH - Push current stack depth ( -- n )
+    ; Calculate: (R15 - stack_base) / 8
+
+    mov rax, forth_stack
+    cmp qword [app_active], 0
+    je .use_main_depth
+    mov rax, app_stack
+.use_main_depth:
+    mov rbx, r15
+    sub rbx, rax
+    shr rbx, 3                  ; Divide by 8
+
+    ; Push to TOS
+    cmp r15, forth_stack
+    je .ad_first
+    cmp r15, app_stack
+    je .ad_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, rbx
+    ret
+.ad_first:
+    mov r14, rbx
+    add r15, 8
+    ret
+
+str_not_in_app: db '(not in app)', 0
+
 word_words:
     ; Push STRING listing all words
     push rsi
@@ -4047,7 +4238,7 @@ word_words:
     mov r14, rax
     ret
 
-str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again ', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-enter app-exit app-stack app-depth ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word
@@ -4137,6 +4328,13 @@ input_buffer: times 80 db 0
 shift_state: db 0
 ctrl_state: db 0
 forth_stack: times 64 dq 0      ; Forth data stack (64 cells)
+
+; App stack isolation
+app_stack: times 64 dq 0        ; Separate stack for apps (64 cells)
+app_saved_tos: dq 0             ; Saved TOS (R14) when entering app
+app_saved_sp: dq 0              ; Saved stack pointer (R15) when entering app
+app_active: dq 0                ; 1 if inside app context, 0 otherwise
+
 compile_mode: db 0              ; 0 = interpret, 1 = compile
 dict_here: dq dictionary_space  ; Next free space in dictionary
 dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)

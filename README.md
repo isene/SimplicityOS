@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.15-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.16-brightgreen.svg)](CHANGELOG.md)
 [![Size](https://img.shields.io/badge/size-1.3KB-red.svg)](#)
 
 Bare-metal x86_64 operating system built on Forth principles.
@@ -70,7 +70,8 @@ make debug
 - **Keyboard control** - Arrow keys, Ctrl combos, non-blocking input
 - **Control flow** - if/then/else, begin/until/while/repeat
 - **Comparison & logic** - = < > <> <= >= 0= and or xor not
-- **Built-in words**: + - * / mod = < > . .s dup drop swap rot over @ ! emit cr if then else begin until while repeat again and or xor not screen-* key-*
+- **App isolation** - Isolated stack context for apps (app-enter/exit)
+- **Built-in words**: + - * / mod = < > . .s dup drop swap rot over @ ! emit cr if then else begin until while repeat again and or xor not screen-* key-* app-*
 - Dictionary with linked list
 - Case-insensitive
 - ~11KB total
@@ -174,6 +175,27 @@ ok
 ok
 > .
 [rect: . . ] ok (contains two point objects)
+```
+
+**App Stack Isolation:**
+```forth
+> 1 2 3 .s
+<3> 1 2 3 ok (main stack has 3 items)
+
+> app-enter
+ok (save main stack, start fresh app stack)
+> .s
+<0> ok (app stack is empty)
+
+> 100 200 +
+ok (app does its work)
+> .s
+<1> 300 ok (app has its own stack)
+
+> app-exit
+ok (restore main stack)
+> .s
+<3> 1 2 3 ok (main stack preserved!)
 ```
 
 **Key Principle**: Nothing prints except `.`

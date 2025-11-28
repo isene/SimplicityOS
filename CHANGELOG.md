@@ -1,5 +1,46 @@
 # Simplicity OS - Changelog
 
+## [0.16] - 2025-11-28 - App Stack Isolation
+
+### New Feature - App Context Switching
+Apps can now run with their own isolated stack, preserving the REPL's stack state.
+
+**New Words:**
+- `app-enter` ( -- ) - Save current stack, start fresh app stack
+- `app-exit` ( -- ) - Restore saved stack, return to REPL
+- `app-stack` ( -- addr ) - Push current stack base address
+- `app-depth` ( -- n ) - Push current stack depth
+
+**Example - Isolated App:**
+```forth
+> 1 2 3 .s
+<3> 1 2 3 ok (main stack has 3 items)
+
+> app-enter
+ok (save main stack, start fresh app stack)
+> .s
+<0> ok (app stack is empty)
+
+> 100 200 +
+ok (app does its work)
+> .s
+<1> 300 ok (app has its own stack)
+
+> app-exit
+ok (restore main stack)
+> .s
+<3> 1 2 3 ok (main stack preserved!)
+```
+
+**Use Cases:**
+- Building standalone apps (editors, games)
+- Running untrusted code without affecting REPL state
+- Testing words without polluting the stack
+
+This completes the foundation for building a vim-like editor!
+
+---
+
 ## [0.15] - 2025-11-28 - Control Flow & Comparison
 
 ### New Feature - Full Control Flow
