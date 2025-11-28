@@ -2985,17 +2985,26 @@ str_code_obj: db '(code)', 0
 word_dots:
     ; Display stack: <depth> item1 item2 ...
     ; Shows type-aware representation: 42 "str" [arr:3] (ref)
-    ; Convention: depth = (R15 - forth_stack) / 8
+    ; Convention: depth = (R15 - stack_base) / 8
     ; Depth 0: empty, Depth N: TOS in R14, rest in mem[0..N-2]
+    ; App-aware: uses app_stack when app_active, else forth_stack
     push rax
     push rbx
     push rcx
     push rdi
+    push r8                 ; R8 = stack base
+
+    ; Get correct stack base
+    mov r8, forth_stack
+    cmp qword [app_active], 0
+    je .have_base
+    mov r8, app_stack
+.have_base:
 
     ; Calculate depth
     mov rax, r15
-    sub rax, forth_stack
-    shr rax, 3              ; Depth = (R15 - forth_stack) / 8
+    sub rax, r8
+    shr rax, 3              ; Depth = (R15 - stack_base) / 8
     mov rcx, rax
 
     ; Print <depth>
@@ -3017,7 +3026,7 @@ word_dots:
     dec rcx                 ; Memory items = depth - 1
     jz .print_tos           ; If was depth 1, skip to TOS
 
-    mov rdi, forth_stack
+    mov rdi, r8             ; Use correct stack base
 .loop:
     mov rax, [rdi]
     call print_value_typed
@@ -3033,6 +3042,7 @@ word_dots:
     call print_value_typed
 
 .done:
+    pop r8
     pop rdi
     pop rcx
     pop rbx
