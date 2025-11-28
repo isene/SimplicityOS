@@ -18,7 +18,7 @@ STAGE2_BIN = $(BUILD_DIR)/stage2.bin
 KERNEL_BIN = $(BUILD_DIR)/kernel.bin
 
 # QEMU flags
-QEMU_FLAGS = -drive format=raw,file=$(IMAGE) -display curses
+QEMU_FLAGS = -drive file=$(IMAGE),format=raw,if=ide -display curses
 QEMU_DEBUG_FLAGS = -s -S -d int,cpu_reset
 
 # Image size (1.44MB floppy)
