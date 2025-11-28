@@ -108,4 +108,64 @@ prot_mode:
     ; Should never get here
     hlt
 
+; ============================================================
+; GDT - Must be in first 32KB so 16-bit code can reference it
+; ============================================================
+
+; GDT - 32-bit protected mode
+align 8
+gdt_start:
+    dq 0                ; Null descriptor
+
+gdt_code:
+    dw 0xFFFF           ; Limit low
+    dw 0                ; Base low
+    db 0                ; Base mid
+    db 10011010b        ; Access: present, ring 0, code, readable
+    db 11001111b        ; Flags: 4K granularity, 32-bit (D=1, L=0)
+    db 0                ; Base high
+
+gdt_data:
+    dw 0xFFFF
+    dw 0
+    db 0
+    db 10010010b        ; Access: present, ring 0, data, writable
+    db 11001111b
+    db 0
+
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
+
+; 64-bit GDT
+align 8
+gdt64_start:
+    dq 0                ; Null descriptor
+
+gdt64_code:
+    dw 0xFFFF
+    dw 0
+    db 0
+    db 10011010b
+    db 10101111b        ; G=1, L=1 (64-bit), D=0
+    db 0
+
+gdt64_data:
+    dw 0xFFFF
+    dw 0
+    db 0
+    db 10010010b
+    db 11001111b
+    db 0
+
+gdt64_end:
+
+gdt64_descriptor:
+    dw gdt64_end - gdt64_start - 1
+    dd gdt64_start
+
+msg: db 'Simplicity OS - Protected mode', 0
+
 %include "kernel/simplicity.asm"

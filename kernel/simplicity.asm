@@ -4704,59 +4704,6 @@ cursor: dq 0xB8000 + 160
 ; Dictionary space (4KB for user-defined words)
 dictionary_space: times 4096 db 0
 
-; GDT - 32-bit for now (we'll stay in compatibility mode)
-align 8
-gdt_start:
-    dq 0
+; GDT is now defined in stage2.asm (must be < 32KB from load point)
 
-gdt_code:
-    dw 0xFFFF
-    dw 0
-    db 0
-    db 10011010b
-    db 11001111b        ; 32-bit (D=1, L=0)
-    db 0
-
-gdt_data:
-    dw 0xFFFF
-    dw 0
-    db 0
-    db 10010010b
-    db 11001111b
-    db 0
-
-gdt_end:
-
-gdt_descriptor:
-    dw gdt_end - gdt_start - 1
-    dd gdt_start
-
-; 64-bit GDT
-align 8
-gdt64_start:
-    dq 0                ; Null descriptor
-
-gdt64_code:
-    dw 0xFFFF
-    dw 0
-    db 0
-    db 10011010b
-    db 10101111b        ; G=1, L=1 (64-bit), D=0
-    db 0
-
-gdt64_data:
-    dw 0xFFFF
-    dw 0
-    db 0
-    db 10010010b
-    db 11001111b
-    db 0
-
-gdt64_end:
-
-gdt64_descriptor:
-    dw gdt64_end - gdt64_start - 1
-    dd gdt64_start
-
-msg: db 'Simplicity OS - Long mode test', 0
 msg64: db 'Simplicity OS v0.2 - 64-bit Forth', 0
