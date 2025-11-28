@@ -2625,26 +2625,37 @@ lookup_word:
 .try_app_depth:
     ; app-depth (9 chars)
     cmp rcx, 9
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi], 'a'
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi+1], 'p'
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi+2], 'p'
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi+3], '-'
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi+4], 'd'
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi+5], 'e'
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi+6], 'p'
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi+7], 't'
-    jne .not_found
+    jne .try_ed
     cmp byte [rdi+8], 'h'
-    jne .not_found
+    jne .try_ed
     mov rax, word_app_depth
+    jmp .done
+
+.try_ed:
+    ; ed (2 chars) - mini editor
+    cmp rcx, 2
+    jne .not_found
+    cmp byte [rdi], 'e'
+    jne .not_found
+    cmp byte [rdi+1], 'd'
+    jne .not_found
+    mov rax, word_ed
     jmp .done
 
 .done_immediate:
@@ -4243,6 +4254,311 @@ word_app_depth:
 
 str_not_in_app: db '(not in app)', 0
 
+; ============================================================
+; ED - Mini text editor (vim-like)
+; Demonstrates: app isolation, screen control, keyboard input,
+;               control flow, and the pure data model
+; ============================================================
+; Controls:
+;   Normal mode: h/j/k/l = move, i = insert, q = quit
+;   Insert mode: type text, ESC = back to normal
+; ============================================================
+
+word_ed:
+    ; Enter app context
+    mov [app_saved_tos], r14
+    mov [app_saved_sp], r15
+    mov qword [app_active], 1
+    mov r15, app_stack
+    xor r14, r14
+
+    ; Initialize editor state
+    xor rax, rax
+    mov [ed_cursor_x], rax
+    mov [ed_cursor_y], rax
+    mov byte [ed_mode], 0       ; 0 = normal, 1 = insert
+
+    ; Clear buffer
+    mov rdi, ed_buffer
+    mov rcx, 2000
+    mov al, ' '
+    rep stosb
+
+    ; Clear screen (black background)
+    mov rdi, 0xB8000
+    mov rcx, 2000
+    mov rax, 0x0720072007200720  ; White on black spaces
+    rep stosq
+
+    ; Draw status line (line 24)
+    call ed_draw_status
+
+    ; Position cursor at 0,0
+    mov qword [cursor], 0xB8000
+    call update_hw_cursor
+
+.main_loop:
+    ; Wait for key
+    call wait_key
+
+    ; Check mode
+    cmp byte [ed_mode], 0
+    jne .insert_mode
+
+    ; Normal mode key handling
+    cmp al, 'q'
+    je .quit
+    cmp al, 'i'
+    je .enter_insert
+    cmp al, 'h'
+    je .move_left
+    cmp al, 'j'
+    je .move_down
+    cmp al, 'k'
+    je .move_up
+    cmp al, 'l'
+    je .move_right
+    cmp rax, KEY_LEFT
+    je .move_left
+    cmp rax, KEY_DOWN
+    je .move_down
+    cmp rax, KEY_UP
+    je .move_up
+    cmp rax, KEY_RIGHT
+    je .move_right
+    jmp .main_loop
+
+.insert_mode:
+    ; Insert mode - ESC returns to normal
+    cmp rax, KEY_ESCAPE
+    je .exit_insert
+    cmp al, 27                  ; ESC ASCII
+    je .exit_insert
+
+    ; Backspace
+    cmp al, 8
+    je .backspace
+
+    ; Enter - move to next line
+    cmp al, 10
+    je .newline
+
+    ; Printable character - insert it
+    cmp al, 32
+    jl .main_loop               ; Ignore control chars
+
+    ; Put char in buffer and on screen
+    call ed_put_char
+    jmp .main_loop
+
+.enter_insert:
+    mov byte [ed_mode], 1
+    call ed_draw_status
+    jmp .main_loop
+
+.exit_insert:
+    mov byte [ed_mode], 0
+    call ed_draw_status
+    jmp .main_loop
+
+.move_left:
+    cmp qword [ed_cursor_x], 0
+    je .main_loop
+    dec qword [ed_cursor_x]
+    call ed_update_cursor
+    jmp .main_loop
+
+.move_right:
+    cmp qword [ed_cursor_x], 79
+    jge .main_loop
+    inc qword [ed_cursor_x]
+    call ed_update_cursor
+    jmp .main_loop
+
+.move_up:
+    cmp qword [ed_cursor_y], 0
+    je .main_loop
+    dec qword [ed_cursor_y]
+    call ed_update_cursor
+    jmp .main_loop
+
+.move_down:
+    cmp qword [ed_cursor_y], 23
+    jge .main_loop
+    inc qword [ed_cursor_y]
+    call ed_update_cursor
+    jmp .main_loop
+
+.backspace:
+    cmp qword [ed_cursor_x], 0
+    je .main_loop
+    dec qword [ed_cursor_x]
+    mov al, ' '
+    call ed_put_char_no_advance
+    call ed_update_cursor
+    jmp .main_loop
+
+.newline:
+    mov qword [ed_cursor_x], 0
+    cmp qword [ed_cursor_y], 23
+    jge .main_loop
+    inc qword [ed_cursor_y]
+    call ed_update_cursor
+    jmp .main_loop
+
+.quit:
+    ; Restore REPL stack and exit
+    mov r14, [app_saved_tos]
+    mov r15, [app_saved_sp]
+    mov qword [app_active], 0
+
+    ; Clear screen and restore prompt
+    mov rdi, 0xB8000
+    mov rcx, 2000
+    mov rax, 0x0F200F200F200F20
+    rep stosq
+    mov qword [cursor], 0xB8000
+    call update_hw_cursor
+    ret
+
+; Put character at cursor, advance cursor
+ed_put_char:
+    push rax
+    push rbx
+
+    ; Calculate screen position
+    mov rbx, [ed_cursor_y]
+    imul rbx, 80
+    add rbx, [ed_cursor_x]
+    shl rbx, 1
+    add rbx, 0xB8000
+
+    ; Write char
+    mov [rbx], al
+    mov byte [rbx+1], 0x07      ; White on black
+
+    ; Also store in buffer
+    mov rbx, [ed_cursor_y]
+    imul rbx, 80
+    add rbx, [ed_cursor_x]
+    add rbx, ed_buffer
+    mov [rbx], al
+
+    ; Advance cursor
+    inc qword [ed_cursor_x]
+    cmp qword [ed_cursor_x], 80
+    jl .no_wrap
+    mov qword [ed_cursor_x], 0
+    inc qword [ed_cursor_y]
+    cmp qword [ed_cursor_y], 24
+    jl .no_wrap
+    mov qword [ed_cursor_y], 23
+.no_wrap:
+    call ed_update_cursor
+
+    pop rbx
+    pop rax
+    ret
+
+; Put character without advancing
+ed_put_char_no_advance:
+    push rbx
+
+    ; Calculate screen position
+    mov rbx, [ed_cursor_y]
+    imul rbx, 80
+    add rbx, [ed_cursor_x]
+    shl rbx, 1
+    add rbx, 0xB8000
+
+    ; Write char
+    mov [rbx], al
+    mov byte [rbx+1], 0x07
+
+    ; Also store in buffer
+    mov rbx, [ed_cursor_y]
+    imul rbx, 80
+    add rbx, [ed_cursor_x]
+    add rbx, ed_buffer
+    mov [rbx], al
+
+    pop rbx
+    ret
+
+; Update hardware cursor position
+ed_update_cursor:
+    push rax
+    push rbx
+
+    mov rax, [ed_cursor_y]
+    imul rax, 80
+    add rax, [ed_cursor_x]
+    shl rax, 1
+    add rax, 0xB8000
+    mov [cursor], rax
+    call update_hw_cursor
+
+    pop rbx
+    pop rax
+    ret
+
+; Draw status line at bottom (line 24)
+ed_draw_status:
+    push rax
+    push rbx
+    push rcx
+    push rsi
+
+    ; Calculate line 24 position
+    mov rbx, 0xB8000 + (24 * 160)
+
+    ; Clear status line with inverse video
+    mov rcx, 80
+    mov ax, 0x7020              ; Black on white, space
+.clear_status:
+    mov [rbx], ax
+    add rbx, 2
+    dec rcx
+    jnz .clear_status
+
+    ; Print mode indicator
+    mov rbx, 0xB8000 + (24 * 160)
+    cmp byte [ed_mode], 0
+    jne .show_insert
+
+    ; Normal mode
+    mov rsi, str_normal
+    jmp .print_mode
+
+.show_insert:
+    mov rsi, str_insert
+
+.print_mode:
+    mov ah, 0x70                ; Black on white
+.print_loop:
+    lodsb
+    test al, al
+    jz .done
+    mov [rbx], ax
+    add rbx, 2
+    jmp .print_loop
+
+.done:
+    pop rsi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+str_normal: db ' NORMAL  h/j/k/l:move  i:insert  q:quit ', 0
+str_insert: db ' INSERT  type text  ESC:normal ', 0
+
+; Editor state
+ed_cursor_x: dq 0
+ed_cursor_y: dq 0
+ed_mode: db 0                   ; 0=normal, 1=insert
+ed_buffer: times 2000 db ' '    ; 80x25 text buffer
+
 word_words:
     ; Push STRING listing all words
     push rsi
@@ -4256,7 +4572,7 @@ word_words:
     mov r14, rax
     ret
 
-str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-enter app-exit app-stack app-depth ', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* ed ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word

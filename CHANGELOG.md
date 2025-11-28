@@ -1,5 +1,32 @@
 # Simplicity OS - Changelog
 
+## [0.17] - 2025-11-28 - Built-in Editor
+
+### New Feature - Mini Vim-like Editor
+Type `ed` to launch a full-screen text editor demonstrating all OS primitives.
+
+**Controls:**
+- Normal mode: `h`/`j`/`k`/`l` or arrow keys to move cursor
+- `i` to enter insert mode
+- `q` to quit and return to REPL
+- Insert mode: type text, `ESC` returns to normal mode
+
+**Features:**
+- 80x24 editing area with status bar
+- Mode indicator (NORMAL/INSERT) with help
+- Backspace and Enter support
+- App isolation preserves REPL stack
+
+**Implementation:**
+- Uses app-enter/exit for stack isolation
+- Direct VGA memory manipulation for display
+- PS/2 keyboard with special key handling
+- ~300 lines of assembly
+
+This demonstrates the OS is capable of running real applications!
+
+---
+
 ## [0.16] - 2025-11-28 - App Stack Isolation
 
 ### New Feature - App Context Switching

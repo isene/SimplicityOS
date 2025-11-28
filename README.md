@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.16-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.17-brightgreen.svg)](CHANGELOG.md)
 [![Size](https://img.shields.io/badge/size-1.3KB-red.svg)](#)
 
 Bare-metal x86_64 operating system built on Forth principles.
@@ -71,7 +71,8 @@ make debug
 - **Control flow** - if/then/else, begin/until/while/repeat
 - **Comparison & logic** - = < > <> <= >= 0= and or xor not
 - **App isolation** - Isolated stack context for apps (app-enter/exit)
-- **Built-in words**: + - * / mod = < > . .s dup drop swap rot over @ ! emit cr if then else begin until while repeat again and or xor not screen-* key-* app-*
+- **Built-in editor** - `ed` launches vim-like text editor
+- **Built-in words**: + - * / mod = < > . .s dup drop swap rot over @ ! emit cr if then else begin until while repeat again and or xor not screen-* key-* app-* ed
 - Dictionary with linked list
 - Case-insensitive
 - ~11KB total
@@ -197,6 +198,15 @@ ok (restore main stack)
 > .s
 <3> 1 2 3 ok (main stack preserved!)
 ```
+
+**Built-in Editor:**
+```forth
+> ed
+```
+Launches a vim-like text editor:
+- **Normal mode**: h/j/k/l or arrows to move, `i` for insert, `q` to quit
+- **Insert mode**: Type text, ESC returns to normal mode
+- Status bar shows current mode and commands
 
 **Key Principle**: Nothing prints except `.`
 All operations push data. `.` detects type and renders.
