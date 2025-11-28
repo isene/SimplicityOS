@@ -1,5 +1,54 @@
 # Simplicity OS - Changelog
 
+## [0.15] - 2025-11-28 - Control Flow & Comparison
+
+### New Feature - Full Control Flow
+Complete set of comparison and control flow words for writing real programs.
+
+**Comparison Words:**
+- `=` ( a b -- flag ) - Equal
+- `<` ( a b -- flag ) - Less than
+- `>` ( a b -- flag ) - Greater than
+- `<>` ( a b -- flag ) - Not equal
+- `<=` ( a b -- flag ) - Less or equal
+- `>=` ( a b -- flag ) - Greater or equal
+- `0=` ( n -- flag ) - Zero equal
+- `mod` ( a b -- a%b ) - Modulo
+
+**Logic Words:**
+- `and` ( a b -- a&b ) - Bitwise AND
+- `or` ( a b -- a|b ) - Bitwise OR
+- `xor` ( a b -- a^b ) - Bitwise XOR
+- `not` ( flag -- flag' ) - Logical NOT
+
+**Control Flow (compile-time, IMMEDIATE):**
+- `if` ... `then` - Conditional
+- `if` ... `else` ... `then` - Conditional with alternative
+- `begin` ... `until` - Loop until TOS is true
+- `begin` ... `while` ... `repeat` - Loop while TOS is true
+- `begin` ... `again` - Infinite loop
+
+**Examples:**
+```forth
+: abs ( n -- |n| )
+  dup 0 < if 0 swap - then ;
+
+: countdown ( n -- )
+  begin dup . 1 - dup 0= until drop ;
+
+: factorial ( n -- n! )
+  1 swap begin dup 1 > while
+    swap over * swap 1 -
+  repeat drop ;
+```
+
+**Implementation:**
+- BRANCH: Unconditional jump (offset in next cell)
+- ZBRANCH: Branch if zero (offset in next cell)
+- Control flow uses return stack for compile-time bookkeeping
+
+---
+
 ## [0.14] - 2025-11-28 - Keyboard Enhancements
 
 ### New Feature - Advanced Keyboard Input

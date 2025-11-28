@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.14-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.15-brightgreen.svg)](CHANGELOG.md)
 [![Size](https://img.shields.io/badge/size-1.3KB-red.svg)](#)
 
 Bare-metal x86_64 operating system built on Forth principles.
@@ -68,7 +68,9 @@ make debug
 - **User-defined types** - Build custom types from primitives
 - **Screen control** - Direct VGA manipulation for apps
 - **Keyboard control** - Arrow keys, Ctrl combos, non-blocking input
-- **Built-in words**: + - * / . .s dup drop swap rot over @ ! emit cr len type type-new type-name type-set type-name? screen-* key? key-*
+- **Control flow** - if/then/else, begin/until/while/repeat
+- **Comparison & logic** - = < > <> <= >= 0= and or xor not
+- **Built-in words**: + - * / mod = < > . .s dup drop swap rot over @ ! emit cr if then else begin until while repeat again and or xor not screen-* key-*
 - Dictionary with linked list
 - Case-insensitive
 - ~11KB total

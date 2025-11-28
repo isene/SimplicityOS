@@ -147,6 +147,23 @@ LIT:
     push rax
     jmp NEXT
 
+BRANCH:
+    ; Unconditional branch - offset in next cell
+    lodsq                   ; Get offset
+    add rsi, rax            ; Add to instruction pointer
+    jmp NEXT
+
+ZBRANCH:
+    ; Branch if TOS is zero - offset in next cell
+    lodsq                   ; Get offset
+    pop rbx                 ; Get TOS
+    test rbx, rbx
+    jz .do_branch
+    jmp NEXT                ; Non-zero, don't branch
+.do_branch:
+    add rsi, rax            ; Zero, take branch
+    jmp NEXT
+
 KEY:
     ; Wait for keypress and return ASCII character
     call wait_key
@@ -729,6 +746,16 @@ REPL:
     test rax, rax
     jz .unknown_word
 
+    ; Check if immediate (high bit set) - execute even in compile mode
+    mov rbx, rax
+    test rbx, rbx
+    jns .not_immediate          ; If not negative (high bit clear), not immediate
+    ; Clear the immediate flag and execute
+    btr rax, 63                 ; Clear bit 63
+    call rax
+    jmp .parse_loop
+
+.not_immediate:
     ; Check if it's a dictionary word (has DOCOL code pointer)
     push rax
     mov rbx, [rax]
@@ -1666,6 +1693,12 @@ lookup_word:
     je .found_store
     cmp al, '?'
     je .found_inspect
+    cmp al, '='
+    je .found_eq
+    cmp al, '<'
+    je .found_lt
+    cmp al, '>'
+    je .found_gt
 
     jmp .check_multi
 
@@ -1698,6 +1731,15 @@ lookup_word:
     jmp .done
 .found_inspect:
     mov rax, word_inspect
+    jmp .done
+.found_eq:
+    mov rax, word_eq
+    jmp .done
+.found_lt:
+    mov rax, word_lt
+    jmp .done
+.found_gt:
+    mov rax, word_gt
     jmp .done
 
 .check_multi:
@@ -2243,26 +2285,266 @@ lookup_word:
 .try_key_right:
     ; key-right (9 chars)
     cmp rcx, 9
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi], 'k'
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi+1], 'e'
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi+2], 'y'
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi+3], '-'
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi+4], 'r'
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi+5], 'i'
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi+6], 'g'
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi+7], 'h'
-    jne .not_found
+    jne .try_neq
     cmp byte [rdi+8], 't'
-    jne .not_found
+    jne .try_neq
     mov rax, word_key_right
+    jmp .done
+
+.try_neq:
+    ; <> (2 chars)
+    cmp rcx, 2
+    jne .try_le
+    cmp byte [rdi], '<'
+    jne .try_le
+    cmp byte [rdi+1], '>'
+    jne .try_le
+    mov rax, word_neq
+    jmp .done
+
+.try_le:
+    ; <= (2 chars)
+    cmp rcx, 2
+    jne .try_ge
+    cmp byte [rdi], '<'
+    jne .try_ge
+    cmp byte [rdi+1], '='
+    jne .try_ge
+    mov rax, word_le
+    jmp .done
+
+.try_ge:
+    ; >= (2 chars)
+    cmp rcx, 2
+    jne .try_zeq
+    cmp byte [rdi], '>'
+    jne .try_zeq
+    cmp byte [rdi+1], '='
+    jne .try_zeq
+    mov rax, word_ge
+    jmp .done
+
+.try_zeq:
+    ; 0= (2 chars)
+    cmp rcx, 2
+    jne .try_mod
+    cmp byte [rdi], '0'
+    jne .try_mod
+    cmp byte [rdi+1], '='
+    jne .try_mod
+    mov rax, word_zeq
+    jmp .done
+
+.try_mod:
+    ; mod (3 chars)
+    cmp rcx, 3
+    jne .try_and
+    cmp byte [rdi], 'm'
+    jne .try_and
+    cmp byte [rdi+1], 'o'
+    jne .try_and
+    cmp byte [rdi+2], 'd'
+    jne .try_and
+    mov rax, word_mod
+    jmp .done
+
+.try_and:
+    ; and (3 chars)
+    cmp rcx, 3
+    jne .try_or
+    cmp byte [rdi], 'a'
+    jne .try_or
+    cmp byte [rdi+1], 'n'
+    jne .try_or
+    cmp byte [rdi+2], 'd'
+    jne .try_or
+    mov rax, word_and
+    jmp .done
+
+.try_or:
+    ; or (2 chars)
+    cmp rcx, 2
+    jne .try_xor
+    cmp byte [rdi], 'o'
+    jne .try_xor
+    cmp byte [rdi+1], 'r'
+    jne .try_xor
+    mov rax, word_or
+    jmp .done
+
+.try_xor:
+    ; xor (3 chars)
+    cmp rcx, 3
+    jne .try_not
+    cmp byte [rdi], 'x'
+    jne .try_not
+    cmp byte [rdi+1], 'o'
+    jne .try_not
+    cmp byte [rdi+2], 'r'
+    jne .try_not
+    mov rax, word_xor
+    jmp .done
+
+.try_not:
+    ; not (3 chars)
+    cmp rcx, 3
+    jne .try_if
+    cmp byte [rdi], 'n'
+    jne .try_if
+    cmp byte [rdi+1], 'o'
+    jne .try_if
+    cmp byte [rdi+2], 't'
+    jne .try_if
+    mov rax, word_not
+    jmp .done
+
+.try_if:
+    ; if (2 chars) - IMMEDIATE
+    cmp rcx, 2
+    jne .try_then
+    cmp byte [rdi], 'i'
+    jne .try_then
+    cmp byte [rdi+1], 'f'
+    jne .try_then
+    mov rax, word_if
+    jmp .done_immediate
+
+.try_then:
+    ; then (4 chars) - IMMEDIATE
+    cmp rcx, 4
+    jne .try_else
+    cmp byte [rdi], 't'
+    jne .try_else
+    cmp byte [rdi+1], 'h'
+    jne .try_else
+    cmp byte [rdi+2], 'e'
+    jne .try_else
+    cmp byte [rdi+3], 'n'
+    jne .try_else
+    mov rax, word_then
+    jmp .done_immediate
+
+.try_else:
+    ; else (4 chars) - IMMEDIATE
+    cmp rcx, 4
+    jne .try_begin
+    cmp byte [rdi], 'e'
+    jne .try_begin
+    cmp byte [rdi+1], 'l'
+    jne .try_begin
+    cmp byte [rdi+2], 's'
+    jne .try_begin
+    cmp byte [rdi+3], 'e'
+    jne .try_begin
+    mov rax, word_else
+    jmp .done_immediate
+
+.try_begin:
+    ; begin (5 chars) - IMMEDIATE
+    cmp rcx, 5
+    jne .try_until
+    cmp byte [rdi], 'b'
+    jne .try_until
+    cmp byte [rdi+1], 'e'
+    jne .try_until
+    cmp byte [rdi+2], 'g'
+    jne .try_until
+    cmp byte [rdi+3], 'i'
+    jne .try_until
+    cmp byte [rdi+4], 'n'
+    jne .try_until
+    mov rax, word_begin
+    jmp .done_immediate
+
+.try_until:
+    ; until (5 chars) - IMMEDIATE
+    cmp rcx, 5
+    jne .try_while
+    cmp byte [rdi], 'u'
+    jne .try_while
+    cmp byte [rdi+1], 'n'
+    jne .try_while
+    cmp byte [rdi+2], 't'
+    jne .try_while
+    cmp byte [rdi+3], 'i'
+    jne .try_while
+    cmp byte [rdi+4], 'l'
+    jne .try_while
+    mov rax, word_until
+    jmp .done_immediate
+
+.try_while:
+    ; while (5 chars) - IMMEDIATE
+    cmp rcx, 5
+    jne .try_repeat
+    cmp byte [rdi], 'w'
+    jne .try_repeat
+    cmp byte [rdi+1], 'h'
+    jne .try_repeat
+    cmp byte [rdi+2], 'i'
+    jne .try_repeat
+    cmp byte [rdi+3], 'l'
+    jne .try_repeat
+    cmp byte [rdi+4], 'e'
+    jne .try_repeat
+    mov rax, word_while
+    jmp .done_immediate
+
+.try_repeat:
+    ; repeat (6 chars) - IMMEDIATE
+    cmp rcx, 6
+    jne .try_again
+    cmp byte [rdi], 'r'
+    jne .try_again
+    cmp byte [rdi+1], 'e'
+    jne .try_again
+    cmp byte [rdi+2], 'p'
+    jne .try_again
+    cmp byte [rdi+3], 'e'
+    jne .try_again
+    cmp byte [rdi+4], 'a'
+    jne .try_again
+    cmp byte [rdi+5], 't'
+    jne .try_again
+    mov rax, word_repeat
+    jmp .done_immediate
+
+.try_again:
+    ; again (5 chars) - IMMEDIATE
+    cmp rcx, 5
+    jne .not_found
+    cmp byte [rdi], 'a'
+    jne .not_found
+    cmp byte [rdi+1], 'g'
+    jne .not_found
+    cmp byte [rdi+2], 'a'
+    jne .not_found
+    cmp byte [rdi+3], 'i'
+    jne .not_found
+    cmp byte [rdi+4], 'n'
+    jne .not_found
+    mov rax, word_again
+    jmp .done_immediate
+
+.done_immediate:
+    ; Mark as immediate by setting high bit (bit 63)
+    bts rax, 63
     jmp .done
 
 .not_found:
@@ -2304,6 +2586,126 @@ word_div:
     xor rdx, rdx
     div rbx
     mov r14, rax            ; Quotient becomes TOS
+    ret
+
+word_mod:
+    ; Modulo: second mod TOS
+    sub r15, 8
+    mov rax, [r15]          ; Dividend (second)
+    mov rbx, r14            ; Divisor (TOS)
+    xor rdx, rdx
+    div rbx
+    mov r14, rdx            ; Remainder becomes TOS
+    ret
+
+word_eq:
+    ; Equal: second = TOS -> flag ( a b -- flag )
+    sub r15, 8
+    mov rax, [r15]
+    cmp rax, r14
+    je .eq_true
+    xor r14, r14            ; 0 = false
+    ret
+.eq_true:
+    mov r14, -1             ; -1 = true (all bits set)
+    ret
+
+word_neq:
+    ; Not equal: second <> TOS -> flag
+    sub r15, 8
+    mov rax, [r15]
+    cmp rax, r14
+    jne .neq_true
+    xor r14, r14
+    ret
+.neq_true:
+    mov r14, -1
+    ret
+
+word_lt:
+    ; Less than: second < TOS -> flag
+    sub r15, 8
+    mov rax, [r15]
+    cmp rax, r14
+    jl .lt_true
+    xor r14, r14
+    ret
+.lt_true:
+    mov r14, -1
+    ret
+
+word_gt:
+    ; Greater than: second > TOS -> flag
+    sub r15, 8
+    mov rax, [r15]
+    cmp rax, r14
+    jg .gt_true
+    xor r14, r14
+    ret
+.gt_true:
+    mov r14, -1
+    ret
+
+word_le:
+    ; Less or equal: second <= TOS -> flag
+    sub r15, 8
+    mov rax, [r15]
+    cmp rax, r14
+    jle .le_true
+    xor r14, r14
+    ret
+.le_true:
+    mov r14, -1
+    ret
+
+word_ge:
+    ; Greater or equal: second >= TOS -> flag
+    sub r15, 8
+    mov rax, [r15]
+    cmp rax, r14
+    jge .ge_true
+    xor r14, r14
+    ret
+.ge_true:
+    mov r14, -1
+    ret
+
+word_zeq:
+    ; Zero equal: TOS = 0 -> flag ( n -- flag )
+    test r14, r14
+    jz .zeq_true
+    xor r14, r14
+    ret
+.zeq_true:
+    mov r14, -1
+    ret
+
+word_and:
+    ; Bitwise AND ( a b -- a&b )
+    sub r15, 8
+    and r14, [r15]
+    ret
+
+word_or:
+    ; Bitwise OR ( a b -- a|b )
+    sub r15, 8
+    or r14, [r15]
+    ret
+
+word_xor:
+    ; Bitwise XOR ( a b -- a^b )
+    sub r15, 8
+    xor r14, [r15]
+    ret
+
+word_not:
+    ; Logical NOT ( flag -- flag' )
+    test r14, r14
+    jz .not_true
+    xor r14, r14
+    ret
+.not_true:
+    mov r14, -1
     ret
 
 word_dot:
@@ -2816,10 +3218,47 @@ word_execute:
     je .exec_end
 
     cmp rax, LIT
-    jne .exec_call
+    jne .check_branch
+    ; LIT - push next value
     lodsq
-    mov [r15], rax
+    cmp r15, forth_stack
+    je .lit_first
+    mov [r15-8], r14
     add r15, 8
+    mov r14, rax
+    jmp .exec_loop
+.lit_first:
+    mov r14, rax
+    add r15, 8
+    jmp .exec_loop
+
+.check_branch:
+    cmp rax, BRANCH
+    jne .check_zbranch
+    ; BRANCH - unconditional jump
+    lodsq                   ; Get offset
+    add rsi, rax
+    jmp .exec_loop
+
+.check_zbranch:
+    cmp rax, ZBRANCH
+    jne .exec_call
+    ; ZBRANCH - branch if TOS is zero
+    lodsq                   ; Get offset
+    mov rbx, r14            ; Get TOS
+    ; Pop TOS
+    sub r15, 8
+    cmp r15, forth_stack
+    jle .zbranch_empty
+    mov r14, [r15-8]
+    jmp .zbranch_check
+.zbranch_empty:
+    mov r15, forth_stack
+    xor r14, r14
+.zbranch_check:
+    test rbx, rbx
+    jnz .exec_loop          ; Non-zero, don't branch
+    add rsi, rax            ; Zero, take branch
     jmp .exec_loop
 
 .exec_call:
@@ -3415,6 +3854,186 @@ word_key_right:
     add r15, 8
     ret
 
+; Control flow words - IMMEDIATE (execute during compilation)
+; These use the control flow stack (reusing part of return stack)
+; compile_ptr points to current compilation position
+
+word_if:
+    ; IF - compile ZBRANCH with placeholder, push address for THEN/ELSE
+    ; Must be in compile mode
+    cmp byte [compile_mode], 0
+    je .if_error
+
+    mov rbx, [compile_ptr]
+    mov qword [rbx], ZBRANCH    ; Compile ZBRANCH
+    add rbx, 8
+    ; Push address of placeholder to control stack (using return stack)
+    mov [rbp], rbx              ; Save location of offset
+    sub rbp, 8
+    mov qword [rbx], 0          ; Placeholder offset
+    add rbx, 8
+    mov [compile_ptr], rbx
+    ret
+.if_error:
+    ret
+
+word_then:
+    ; THEN - resolve forward branch from IF or ELSE
+    cmp byte [compile_mode], 0
+    je .then_error
+
+    ; Pop address from control stack
+    add rbp, 8
+    mov rbx, [rbp]              ; Address of placeholder
+    mov rax, [compile_ptr]
+    sub rax, rbx                ; Calculate offset
+    sub rax, 8                  ; Adjust for already past placeholder
+    mov [rbx], rax              ; Fill in the offset
+    ret
+.then_error:
+    ret
+
+word_else:
+    ; ELSE - compile BRANCH, resolve IF's placeholder, push new placeholder
+    cmp byte [compile_mode], 0
+    je .else_error
+
+    mov rcx, [compile_ptr]
+    mov qword [rcx], BRANCH     ; Compile unconditional branch
+    add rcx, 8
+
+    ; Pop IF's placeholder, push ELSE's placeholder
+    add rbp, 8
+    mov rbx, [rbp]              ; IF's placeholder address
+
+    mov [rbp], rcx              ; Push ELSE's placeholder address
+    sub rbp, 8
+
+    mov qword [rcx], 0          ; ELSE's placeholder
+    add rcx, 8
+    mov [compile_ptr], rcx
+
+    ; Resolve IF's branch (to here, after ELSE's branch instruction)
+    mov rax, [compile_ptr]
+    sub rax, rbx
+    sub rax, 8
+    mov [rbx], rax
+    ret
+.else_error:
+    ret
+
+word_begin:
+    ; BEGIN - mark loop start, push address
+    cmp byte [compile_mode], 0
+    je .begin_error
+
+    ; Push current compile address to control stack
+    mov rax, [compile_ptr]
+    mov [rbp], rax
+    sub rbp, 8
+    ret
+.begin_error:
+    ret
+
+word_until:
+    ; UNTIL - compile ZBRANCH back to BEGIN
+    cmp byte [compile_mode], 0
+    je .until_error
+
+    ; Pop loop start address
+    add rbp, 8
+    mov rbx, [rbp]              ; BEGIN address
+
+    mov rcx, [compile_ptr]
+    mov qword [rcx], ZBRANCH    ; Compile ZBRANCH
+    add rcx, 8
+
+    ; Calculate backward offset (negative)
+    mov rax, rbx
+    sub rax, rcx
+    sub rax, 8                  ; Adjust for offset cell itself
+    mov [rcx], rax
+    add rcx, 8
+    mov [compile_ptr], rcx
+    ret
+.until_error:
+    ret
+
+word_while:
+    ; WHILE - like IF but inside a loop, push placeholder
+    cmp byte [compile_mode], 0
+    je .while_error
+
+    mov rbx, [compile_ptr]
+    mov qword [rbx], ZBRANCH
+    add rbx, 8
+    mov [rbp], rbx              ; Push placeholder address
+    sub rbp, 8
+    mov qword [rbx], 0          ; Placeholder
+    add rbx, 8
+    mov [compile_ptr], rbx
+    ret
+.while_error:
+    ret
+
+word_repeat:
+    ; REPEAT - compile BRANCH back to BEGIN, resolve WHILE
+    cmp byte [compile_mode], 0
+    je .repeat_error
+
+    ; Pop WHILE placeholder
+    add rbp, 8
+    mov rbx, [rbp]              ; WHILE's placeholder
+
+    ; Pop BEGIN address
+    add rbp, 8
+    mov rdx, [rbp]              ; BEGIN address
+
+    mov rcx, [compile_ptr]
+    mov qword [rcx], BRANCH     ; Compile unconditional branch
+    add rcx, 8
+
+    ; Calculate backward offset to BEGIN
+    mov rax, rdx
+    sub rax, rcx
+    sub rax, 8
+    mov [rcx], rax
+    add rcx, 8
+    mov [compile_ptr], rcx
+
+    ; Resolve WHILE's branch (to here, after loop)
+    mov rax, [compile_ptr]
+    sub rax, rbx
+    sub rax, 8
+    mov [rbx], rax
+    ret
+.repeat_error:
+    ret
+
+word_again:
+    ; AGAIN - compile unconditional BRANCH back to BEGIN
+    cmp byte [compile_mode], 0
+    je .again_error
+
+    ; Pop loop start address
+    add rbp, 8
+    mov rbx, [rbp]              ; BEGIN address
+
+    mov rcx, [compile_ptr]
+    mov qword [rcx], BRANCH     ; Compile BRANCH
+    add rcx, 8
+
+    ; Calculate backward offset
+    mov rax, rbx
+    sub rax, rcx
+    sub rax, 8
+    mov [rcx], rax
+    add rcx, 8
+    mov [compile_ptr], rcx
+    ret
+.again_error:
+    ret
+
 word_words:
     ; Push STRING listing all words
     push rsi
@@ -3428,7 +4047,7 @@ word_words:
     mov r14, rax
     ret
 
-str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-get screen-set screen-char screen-clear screen-scroll key? key-escape key-up key-down key-left key-right ', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word
