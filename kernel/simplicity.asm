@@ -898,15 +898,21 @@ REPL:
     jne .compile_literal
 
     ; Interpret mode - push to stack
-    ; Convention: R15 = forth_stack + 8*depth
-    ; Empty: R15=forth_stack, R14=undefined
-    ; Depth N: R15=forth_stack+8N, R14=TOS, mem[0..N-2]=rest
+    ; Convention: R15 = stack_base + 8*depth
+    ; Empty: R15=stack_base, R14=undefined
+    ; Depth N: R15=stack_base+8N, R14=TOS, mem[0..N-2]=rest
     ;
     ; On push: if depth > 0, save old TOS to mem[depth-1], then set new TOS
-    cmp r15, forth_stack
+    ; App-aware: check against correct stack base
+    mov rbx, forth_stack
+    cmp qword [app_active], 0
+    je .check_empty
+    mov rbx, app_stack
+.check_empty:
+    cmp r15, rbx
     je .push_first
     ; Stack has items - save old TOS to memory at index (depth-1)
-    ; mem[depth-1] = mem[(R15-forth_stack)/8 - 1] = [R15-8]
+    ; mem[depth-1] = mem[(R15-stack_base)/8 - 1] = [R15-8]
     mov [r15-8], r14
     add r15, 8
     mov r14, rax
@@ -915,7 +921,7 @@ REPL:
 .push_first:
     ; First item - just set TOS and mark stack non-empty
     mov r14, rax
-    add r15, 8              ; R15 = forth_stack + 8 means depth 1
+    add r15, 8              ; R15 = stack_base + 8 means depth 1
     jmp .parse_loop
 
 .compile_literal:
