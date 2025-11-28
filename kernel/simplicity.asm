@@ -1699,13 +1699,75 @@ lookup_word:
     jne .try_see
     cmp byte [rdi+6], '-'
     jne .try_see
+    ; Check which screen word: get, set, char, clear, scroll
     cmp byte [rdi+7], 'g'
-    jne .try_see
+    jne .try_screen_set
     cmp byte [rdi+8], 'e'
-    jne .try_see
+    jne .try_screen_set
     cmp byte [rdi+9], 't'
-    jne .try_see
+    jne .try_screen_set
     mov rax, word_screen_get
+    jmp .done
+
+.try_screen_set:
+    cmp byte [rdi+7], 's'
+    jne .try_screen_char
+    cmp byte [rdi+8], 'e'
+    jne .try_screen_char
+    cmp byte [rdi+9], 't'
+    jne .try_screen_char
+    mov rax, word_screen_set
+    jmp .done
+
+.try_screen_char:
+    ; screen-char (11 chars)
+    cmp rcx, 11
+    jne .try_screen_clear
+    cmp byte [rdi+7], 'c'
+    jne .try_screen_clear
+    cmp byte [rdi+8], 'h'
+    jne .try_screen_clear
+    cmp byte [rdi+9], 'a'
+    jne .try_screen_clear
+    cmp byte [rdi+10], 'r'
+    jne .try_screen_clear
+    mov rax, word_screen_char
+    jmp .done
+
+.try_screen_clear:
+    ; screen-clear (12 chars)
+    cmp rcx, 12
+    jne .try_screen_scroll
+    cmp byte [rdi+7], 'c'
+    jne .try_screen_scroll
+    cmp byte [rdi+8], 'l'
+    jne .try_screen_scroll
+    cmp byte [rdi+9], 'e'
+    jne .try_screen_scroll
+    cmp byte [rdi+10], 'a'
+    jne .try_screen_scroll
+    cmp byte [rdi+11], 'r'
+    jne .try_screen_scroll
+    mov rax, word_screen_clear
+    jmp .done
+
+.try_screen_scroll:
+    ; screen-scroll (13 chars)
+    cmp rcx, 13
+    jne .try_see
+    cmp byte [rdi+7], 's'
+    jne .try_see
+    cmp byte [rdi+8], 'c'
+    jne .try_see
+    cmp byte [rdi+9], 'r'
+    jne .try_see
+    cmp byte [rdi+10], 'o'
+    jne .try_see
+    cmp byte [rdi+11], 'l'
+    jne .try_see
+    cmp byte [rdi+12], 'l'
+    jne .try_see
+    mov rax, word_screen_scroll
     jmp .done
 
 .try_see:
@@ -2744,6 +2806,175 @@ word_screen_get:
     mov r14, r8             ; Array becomes new TOS
     ret
 
+word_screen_set:
+    ; SCREEN-SET - Move cursor to x,y ( x y -- )
+    ; TOS = y, second = x
+    mov rax, r14            ; RAX = y
+    sub r15, 8
+    mov rbx, [r15]          ; RBX = x
+
+    ; Calculate VGA offset: (y * 80 + x) * 2 + 0xB8000
+    imul rax, 80            ; y * 80
+    add rax, rbx            ; + x
+    shl rax, 1              ; * 2 (char + attr)
+    add rax, 0xB8000
+
+    ; Update cursor
+    mov [cursor], rax
+    call update_hw_cursor
+
+    ; Pop both, load new TOS
+    sub r15, 8
+    cmp r15, forth_stack
+    jle .ss_empty
+    mov r14, [r15-8]
+    ret
+.ss_empty:
+    mov r15, forth_stack
+    xor r14, r14
+    ret
+
+word_screen_char:
+    ; SCREEN-CHAR - Put char at x,y with color ( char color x y -- )
+    ; TOS = y, then x, color, char
+    mov rax, r14            ; RAX = y
+    sub r15, 8
+    mov rbx, [r15]          ; RBX = x
+    sub r15, 8
+    mov rcx, [r15]          ; RCX = color
+    sub r15, 8
+    mov rdx, [r15]          ; RDX = char
+
+    ; Calculate VGA offset: (y * 80 + x) * 2 + 0xB8000
+    imul rax, 80
+    add rax, rbx
+    shl rax, 1
+    add rax, 0xB8000
+
+    ; Write char and color
+    mov [rax], dl           ; Character
+    mov [rax+1], cl         ; Color attribute
+
+    ; Pop all four, load new TOS
+    sub r15, 8
+    cmp r15, forth_stack
+    jle .sc_empty
+    mov r14, [r15-8]
+    ret
+.sc_empty:
+    mov r15, forth_stack
+    xor r14, r14
+    ret
+
+word_screen_clear:
+    ; SCREEN-CLEAR - Clear screen with color ( color -- )
+    mov rcx, r14            ; Color attribute
+
+    ; Clear all 80x25 characters
+    mov rdi, 0xB8000
+    mov rax, rcx
+    shl rax, 8              ; Color in high byte
+    or rax, 0x20            ; Space in low byte
+    mov rdx, rax
+    shl rdx, 16
+    or rax, rdx             ; Two chars at once
+    shl rdx, 16
+    or rax, rdx
+    shl rdx, 16
+    or rax, rdx             ; Four chars in RAX
+
+    mov rcx, 500            ; 2000 chars / 4 = 500 qwords
+.clear_loop:
+    mov [rdi], rax
+    add rdi, 8
+    dec rcx
+    jnz .clear_loop
+
+    ; Reset cursor to top-left
+    mov qword [cursor], 0xB8000
+    call update_hw_cursor
+
+    ; Pop color, load new TOS
+    sub r15, 8
+    cmp r15, forth_stack
+    jle .scl_empty
+    mov r14, [r15-8]
+    ret
+.scl_empty:
+    mov r15, forth_stack
+    xor r14, r14
+    ret
+
+word_screen_scroll:
+    ; SCREEN-SCROLL - Scroll screen up n lines ( n -- )
+    mov rcx, r14            ; RCX = lines to scroll
+
+    ; Validate
+    cmp rcx, 25
+    jge .scroll_clear       ; If >= 25, just clear
+
+    ; Calculate bytes to copy: (25 - n) * 80 * 2
+    mov rax, 25
+    sub rax, rcx
+    imul rax, 160           ; (25-n) * 80 * 2
+
+    ; Source: line n = 0xB8000 + n * 160
+    mov rsi, rcx
+    imul rsi, 160
+    add rsi, 0xB8000
+
+    ; Dest: line 0
+    mov rdi, 0xB8000
+
+    ; Copy (rax bytes, but we'll do qwords)
+    push rcx
+    mov rcx, rax
+    shr rcx, 3              ; Bytes to qwords
+.copy_loop:
+    mov rax, [rsi]
+    mov [rdi], rax
+    add rsi, 8
+    add rdi, 8
+    dec rcx
+    jnz .copy_loop
+    pop rcx
+
+    ; Clear bottom n lines
+    ; RDI is now at start of area to clear
+    imul rcx, 160           ; Bytes to clear
+    shr rcx, 3              ; Qwords
+    mov rax, 0x0F200F200F200F20  ; Spaces with white-on-black
+.clear_bottom:
+    mov [rdi], rax
+    add rdi, 8
+    dec rcx
+    jnz .clear_bottom
+
+    jmp .scroll_done
+
+.scroll_clear:
+    ; Clear entire screen
+    mov rdi, 0xB8000
+    mov rcx, 500
+    mov rax, 0x0F200F200F200F20
+.full_clear:
+    mov [rdi], rax
+    add rdi, 8
+    dec rcx
+    jnz .full_clear
+
+.scroll_done:
+    ; Pop n, load new TOS
+    sub r15, 8
+    cmp r15, forth_stack
+    jle .scr_empty
+    mov r14, [r15-8]
+    ret
+.scr_empty:
+    mov r15, forth_stack
+    xor r14, r14
+    ret
+
 word_words:
     ; Push STRING listing all words
     push rsi
@@ -2757,7 +2988,7 @@ word_words:
     mov r14, rax
     ret
 
-str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute screen-get len type array at put { } type-new type-name type-set type-name? ', 0
+str_builtins: db '+ - * / . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-get screen-set screen-char screen-clear screen-scroll ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word

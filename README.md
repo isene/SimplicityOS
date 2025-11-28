@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.12-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.13-brightgreen.svg)](CHANGELOG.md)
 [![Size](https://img.shields.io/badge/size-1.3KB-red.svg)](#)
 
 Bare-metal x86_64 operating system built on Forth principles.
@@ -66,7 +66,8 @@ make debug
 - **Arrays** - `{ 1 2 3 }` literal syntax with nested support
 - **Type introspection** - `type` and `len` words
 - **User-defined types** - Build custom types from primitives
-- **Built-in words**: + - * / . .s dup drop swap rot over @ ! emit cr len type type-new type-name type-set type-name?
+- **Screen control** - Direct VGA manipulation for apps
+- **Built-in words**: + - * / . .s dup drop swap rot over @ ! emit cr len type type-new type-name type-set type-name? screen-get screen-set screen-char screen-clear screen-scroll
 - Dictionary with linked list
 - Case-insensitive
 - ~11KB total

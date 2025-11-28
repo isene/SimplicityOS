@@ -1,5 +1,45 @@
 # Simplicity OS - Changelog
 
+## [0.13] - 2025-11-28 - Screen Primitives
+
+### New Feature - VGA Screen Control
+Foundation for building text-mode applications like editors.
+
+**New Words:**
+- `screen-get` ( -- array ) - Returns [width height cursor_x cursor_y]
+- `screen-set` ( x y -- ) - Move cursor to position
+- `screen-char` ( char color x y -- ) - Put character at position with color
+- `screen-clear` ( color -- ) - Clear screen with color attribute
+- `screen-scroll` ( n -- ) - Scroll screen up n lines
+
+**Color Attributes:**
+```
+Bits 0-3: Foreground (0=black, 1=blue, 2=green, ..., 15=white)
+Bits 4-6: Background
+Bit 7: Blink
+
+Common: 0x0F=white-on-black, 0x1F=white-on-blue, 0x4F=white-on-red
+```
+
+**Examples:**
+```forth
+( Clear screen blue )
+0x1F screen-clear
+
+( Draw red X at position 40,12 )
+88 0x4F 40 12 screen-char
+
+( Move cursor to top-left )
+0 0 screen-set
+
+( Scroll up 5 lines )
+5 screen-scroll
+```
+
+**Goal:** These primitives enable building a vim-like editor entirely in Forth.
+
+---
+
 ## [0.12] - 2025-11-28 - User-Defined Types
 
 ### New Feature - Type Lego System
