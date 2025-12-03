@@ -652,6 +652,9 @@ REPL:
     mov r14, 0              ; Top of stack (TOS) - empty initially
     mov rbp, 0x90000        ; Return stack (away from page tables at 0x70000) (grows down)
 
+    ; Load embedded apps (defines editor, invaders words)
+    call load_apps
+
 .main_loop:
     ; Print prompt
     mov rax, str_prompt
@@ -4652,6 +4655,462 @@ word_semi:
     ; Create dictionary entry
     call create_dict_entry
     ret
+
+; =============================================================
+; interpret_forth_buffer - Interpret Forth source from memory
+; Input: RSI = pointer to null-terminated Forth source
+; Preserves: R14, R15, RBP (Forth stacks)
+; =============================================================
+interpret_forth_buffer:
+    push rbx
+    push r12
+    push r13
+    mov r12, rsi                ; Save source pointer
+
+.next_line:
+    ; Copy line to input_buffer
+    mov rdi, input_buffer
+    xor rcx, rcx                ; Line length
+
+.copy_char:
+    mov al, [r12]
+    cmp al, 0                   ; End of source?
+    je .done_copying
+    cmp al, 10                  ; Newline?
+    je .end_line
+    cmp al, 13                  ; CR?
+    je .skip_cr
+    mov [rdi], al
+    inc rdi
+    inc r12
+    inc rcx
+    cmp rcx, 79                 ; Max line length
+    jl .copy_char
+    jmp .end_line
+
+.skip_cr:
+    inc r12
+    jmp .copy_char
+
+.end_line:
+    inc r12                     ; Skip newline
+
+.done_copying:
+    mov byte [rdi], 0           ; Null terminate
+
+    ; Skip empty lines
+    test rcx, rcx
+    jz .check_more
+
+    ; Process the line (reuse REPL's parse logic)
+    mov rsi, input_buffer
+    call interpret_line
+
+.check_more:
+    ; Check if more source
+    mov al, [r12]
+    test al, al
+    jnz .next_line
+
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; interpret_line - Interpret tokens from RSI until null
+; Reuses existing parse/interpret logic
+interpret_line:
+    push rbx
+    push r13
+    mov r13, rsi                ; Save source pointer
+
+.iline_parse_loop:
+    mov rsi, r13
+    ; Skip spaces
+    call skip_spaces
+    mov r13, rsi
+
+    cmp byte [rsi], 0
+    je .iline_done
+
+    ; Check for comments (backslash or parenthesis)
+    cmp byte [rsi], '\'
+    je .iline_done              ; Skip rest of line on backslash
+    cmp byte [rsi], '('
+    je .iline_skip_comment
+
+    ; Check for bracket [name] - named variable access
+    cmp byte [rsi], '['
+    je .iline_handle_bracket
+
+    ; Get word using parse_word
+    call parse_word             ; RDI = word start, RCX = length
+    mov r13, rsi                ; Update position after parse
+
+    test rcx, rcx
+    jz .iline_parse_loop
+
+    ; Check if getting name for definition
+    cmp byte [compile_mode], 2
+    je .iline_save_name
+
+    ; Check if number
+    call is_number
+    test rax, rax
+    jnz .iline_push_number
+
+    ; Check if known word
+    call lookup_word
+    test rax, rax
+    jz .iline_unknown
+
+    ; Check for immediate words (always execute, even during compilation)
+    ; ; (semicolon) is immediate - ends compilation
+    cmp rax, word_semi
+    je .iline_exec_immediate
+    ; Control flow words are immediate - they compile code themselves
+    cmp rax, word_if
+    je .iline_exec_immediate
+    cmp rax, word_then
+    je .iline_exec_immediate
+    cmp rax, word_else
+    je .iline_exec_immediate
+    cmp rax, word_begin
+    je .iline_exec_immediate
+    cmp rax, word_until
+    je .iline_exec_immediate
+
+    ; Execute or compile word
+    cmp byte [compile_mode], 0
+    jne .iline_compile_word
+
+    ; Check if dictionary word
+    push rax
+    mov rbx, [rax]
+    cmp rbx, DOCOL
+    pop rax
+    je .iline_dict_word
+
+.iline_exec_immediate:
+    ; Built-in word - execute
+    call rax
+    jmp .iline_parse_loop
+
+.iline_dict_word:
+    ; Execute dictionary word using the standard mechanism
+    push r13                    ; Save parse position
+    add rax, 8                  ; Skip code pointer
+    mov rsi, rax
+    call exec_definition
+    pop r13
+    jmp .iline_parse_loop
+
+.iline_compile_word:
+    ; Compiling - store word address
+    ; Check if dictionary word
+    push rax
+    mov rbx, [rax]
+    cmp rbx, DOCOL
+    pop rax
+    jne .iline_compile_builtin
+
+    ; Dictionary word - store code field address
+    mov rbx, [compile_ptr]
+    mov [rbx], rax
+    add rbx, 8
+    mov [compile_ptr], rbx
+    jmp .iline_parse_loop
+
+.iline_compile_builtin:
+    ; Built-in - store function address
+    mov rbx, [compile_ptr]
+    mov [rbx], rax
+    add rbx, 8
+    mov [compile_ptr], rbx
+    jmp .iline_parse_loop
+
+.iline_push_number:
+    ; Check if compiling
+    cmp byte [compile_mode], 0
+    jne .iline_compile_number
+
+    ; Push number to stack (interpret mode)
+    mov [r15], r14              ; Push old TOS
+    add r15, 8
+    mov r14, rax                ; New TOS
+    jmp .iline_parse_loop
+
+.iline_compile_number:
+    ; Compile LIT + number
+    mov rbx, [compile_ptr]
+    mov qword [rbx], LIT
+    mov [rbx+8], rax
+    add rbx, 16
+    mov [compile_ptr], rbx
+    jmp .iline_parse_loop
+
+.iline_save_name:
+    ; Save word name for definition
+    push rdi
+    push rcx
+    mov rsi, rdi
+    mov rdi, new_word_name
+    rep movsb
+    mov byte [rdi], 0
+    pop rcx
+    pop rdi
+    mov byte [compile_mode], 1  ; Switch to compile mode
+    jmp .iline_parse_loop
+
+.iline_unknown:
+    ; Unknown word - ignore silently during boot
+    jmp .iline_parse_loop
+
+.iline_skip_comment:
+    ; Skip until )
+.iline_skip_to_paren:
+    inc r13
+    cmp byte [r13], 0
+    je .iline_done
+    cmp byte [r13], ')'
+    jne .iline_skip_to_paren
+    inc r13                     ; Skip )
+    jmp .iline_parse_loop
+
+.iline_handle_bracket:
+    ; Handle [name] variable access
+    inc r13                     ; Skip [
+    mov rdi, r13
+    xor rcx, rcx
+.iline_get_varname:
+    mov al, [r13]
+    cmp al, ']'
+    je .iline_got_varname
+    cmp al, 0
+    je .iline_done
+    inc r13
+    inc rcx
+    jmp .iline_get_varname
+
+.iline_got_varname:
+    inc r13                     ; Skip ]
+    ; RDI = name start, RCX = length
+    call get_or_create_named_var  ; Returns address in RAX
+
+    ; Check if compiling
+    cmp byte [compile_mode], 0
+    jne .iline_compile_var
+
+    ; Push address to stack
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    jmp .iline_parse_loop
+
+.iline_compile_var:
+    ; Compile LIT + address
+    mov rbx, [compile_ptr]
+    mov qword [rbx], LIT
+    mov [rbx+8], rax
+    add rbx, 16
+    mov [compile_ptr], rbx
+    jmp .iline_parse_loop
+
+.iline_done:
+    pop r13
+    pop rbx
+    ret
+
+; exec_definition - Execute a colon definition
+; Input: RSI = pointer to definition body (after DOCOL)
+exec_definition:
+    push r13
+.exec_def_loop:
+    lodsq
+    cmp rax, EXIT
+    je .exec_def_done
+
+    ; Check for LIT
+    cmp rax, LIT
+    jne .exec_not_lit
+    lodsq
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    jmp .exec_def_loop
+
+.exec_not_lit:
+    ; Check for BRANCH
+    cmp rax, BRANCH
+    jne .exec_not_branch
+    lodsq
+    add rsi, rax
+    jmp .exec_def_loop
+
+.exec_not_branch:
+    ; Check for ZBRANCH
+    cmp rax, ZBRANCH
+    jne .exec_not_zbranch
+    lodsq                       ; Get offset
+    test r14, r14               ; Check TOS
+    sub r15, 8
+    mov r14, [r15]              ; Pop new TOS
+    jnz .exec_def_loop          ; If not zero, don't branch
+    add rsi, rax                ; Branch
+    jmp .exec_def_loop
+
+.exec_not_zbranch:
+    ; Check if nested dictionary word
+    cmp rax, dictionary_space
+    jl .exec_is_builtin
+    mov r13, [dict_here]
+    cmp rax, r13
+    jge .exec_is_builtin
+    mov rbx, [rax]
+    cmp rbx, DOCOL
+    jne .exec_is_builtin
+
+    ; Nested definition - recurse
+    push rsi
+    add rax, 8
+    mov rsi, rax
+    call exec_definition
+    pop rsi
+    jmp .exec_def_loop
+
+.exec_is_builtin:
+    push rsi
+    call rax
+    pop rsi
+    jmp .exec_def_loop
+
+.exec_def_done:
+    pop r13
+    ret
+
+; serial_putchar - Output a character to serial port (for debugging)
+; Input: AL = character
+serial_putchar:
+    push rdx
+    push rax
+    mov dx, 0x3F8 + 5       ; Line status register
+.wait:
+    in al, dx
+    test al, 0x20           ; Transmit buffer empty?
+    jz .wait
+    pop rax
+    mov dx, 0x3F8           ; Data register
+    out dx, al
+    pop rdx
+    ret
+
+; serial_print - Output string to serial port
+; Input: RSI = null-terminated string
+serial_print:
+    push rsi
+    push rax
+.loop:
+    lodsb
+    test al, al
+    jz .done
+    call serial_putchar
+    jmp .loop
+.done:
+    pop rax
+    pop rsi
+    ret
+
+; load_apps - Load embedded apps at boot
+load_apps:
+    push rbx
+
+    ; Debug output to serial
+    mov rsi, serial_loading_editor
+    call serial_print
+
+    ; Load embedded test code
+    mov rsi, embedded_test
+    call interpret_forth_buffer
+
+    ; Debug output to serial
+    mov rsi, serial_apps_done
+    call serial_print
+
+    pop rbx
+    ret
+
+serial_loading_editor: db 'Loading editor...', 13, 10, 0
+serial_loading_invaders: db 'Loading invaders...', 13, 10, 0
+serial_apps_done: db 'Apps loaded OK', 13, 10, 0
+
+; =============================================================
+; Embedded Forth Apps
+; =============================================================
+
+; Test first part of editor - incrementally adding lines
+; NOTE: if-then has a bug when used in embedded Forth, so using simple version
+embedded_test:
+    db '0 [editor-x] !', 10
+    db '0 [editor-y] !', 10
+    db '0 [editor-mode] !', 10
+    db ': white-on-black 7 ;', 10
+    db ': black-on-white 112 ;', 10
+    db ': draw-char white-on-black rot rot screen-char ;', 10
+    db ': clear-editor white-on-black screen-clear 0 [editor-x] ! 0 [editor-y] ! ;', 10
+    db ': move-cursor [editor-x] @ [editor-y] @ screen-set ;', 10
+    db ': status-line 69 black-on-white 0 24 screen-char 68 black-on-white 1 24 screen-char move-cursor ;', 10
+    db ': editor clear-editor status-line move-cursor ;', 10
+    db 0
+
+embedded_editor:
+    db '0 [editor-x] !', 10
+    db '0 [editor-y] !', 10
+    db '0 [editor-mode] !', 10
+    db ': white-on-black 7 ;', 10
+    db ': black-on-white 112 ;', 10
+    db ': draw-char white-on-black rot rot screen-char ;', 10
+    db ': clear-editor white-on-black screen-clear 0 [editor-x] ! 0 [editor-y] ! ;', 10
+    db ': move-cursor [editor-x] @ [editor-y] @ screen-set ;', 10
+    db ': status-line 32 black-on-white 0 24 screen-char [editor-mode] @ if 73 black-on-white 1 24 screen-char 78 black-on-white 2 24 screen-char 83 black-on-white 3 24 screen-char else 78 black-on-white 1 24 screen-char 79 black-on-white 2 24 screen-char 82 black-on-white 3 24 screen-char then 32 black-on-white 4 24 screen-char 32 black-on-white 5 24 screen-char 88 black-on-white 6 24 screen-char 58 black-on-white 7 24 screen-char [editor-x] @ 10 / 48 + black-on-white 8 24 screen-char [editor-x] @ 10 mod 48 + black-on-white 9 24 screen-char 32 black-on-white 10 24 screen-char 32 black-on-white 11 24 screen-char 89 black-on-white 12 24 screen-char 58 black-on-white 13 24 screen-char [editor-y] @ 10 / 48 + black-on-white 14 24 screen-char [editor-y] @ 10 mod 48 + black-on-white 15 24 screen-char move-cursor ;', 10
+    db ': editor-left [editor-x] @ 0 > if [editor-x] @ 1 - [editor-x] ! then status-line ;', 10
+    db ': editor-right [editor-x] @ 78 < if [editor-x] @ 1 + [editor-x] ! then status-line ;', 10
+    db ': editor-up [editor-y] @ 0 > if [editor-y] @ 1 - [editor-y] ! then status-line ;', 10
+    db ': editor-down [editor-y] @ 22 < if [editor-y] @ 1 + [editor-y] ! then status-line ;', 10
+    db ': editor-enter 0 [editor-x] ! [editor-y] @ 22 < if [editor-y] @ 1 + [editor-y] ! then status-line ;', 10
+    db ': insert-char [editor-x] @ [editor-y] @ draw-char editor-right ;', 10
+    db ': enter-insert 1 [editor-mode] ! status-line ;', 10
+    db ': exit-insert 0 [editor-mode] ! status-line ;', 10
+    db ': editor-loop begin key [editor-mode] @ if dup key-escape = if drop exit-insert else dup 13 = if drop editor-enter else dup 32 >= over 126 <= and if insert-char else drop then then then 1 else dup 113 = if drop 0 else dup 104 = if drop editor-left 1 else dup 106 = if drop editor-down 1 else dup 107 = if drop editor-up 1 else dup 108 = if drop editor-right 1 else dup 105 = if drop enter-insert 1 else dup key-left = if drop editor-left 1 else dup key-right = if drop editor-right 1 else dup key-up = if drop editor-up 1 else dup key-down = if drop editor-down 1 else drop 1 then then then then then then then then then then then 0 = until ;', 10
+    db ': editor clear-editor status-line move-cursor editor-loop 15 screen-clear 0 0 screen-set ;', 10
+    db 0
+
+embedded_invaders:
+    db '0 [ship-x] !', 10
+    db '0 [score] !', 10
+    db '0 [game-over] !', 10
+    db '0 [bullet-x] !', 10
+    db '0 [bullet-y] !', 10
+    db '0 [bullet-active] !', 10
+    db ': ship-char 65 ;', 10
+    db ': alien-char 77 ;', 10
+    db ': bullet-char 124 ;', 10
+    db ': empty-char 32 ;', 10
+    db ': game-color 10 ;', 10
+    db ': ship-color 14 ;', 10
+    db ': alien-color 12 ;', 10
+    db ': bullet-color 15 ;', 10
+    db ': draw-ship ship-char ship-color [ship-x] @ 23 screen-char ;', 10
+    db ': erase-ship empty-char game-color [ship-x] @ 23 screen-char ;', 10
+    db ': draw-bullet [bullet-active] @ if bullet-char bullet-color [bullet-x] @ [bullet-y] @ screen-char then ;', 10
+    db ': erase-bullet [bullet-active] @ if empty-char game-color [bullet-x] @ [bullet-y] @ screen-char then ;', 10
+    db ': ship-left erase-ship [ship-x] @ 1 > if [ship-x] @ 1 - [ship-x] ! then draw-ship ;', 10
+    db ': ship-right erase-ship [ship-x] @ 77 < if [ship-x] @ 1 + [ship-x] ! then draw-ship ;', 10
+    db ': fire [bullet-active] @ 0 = if [ship-x] @ [bullet-x] ! 22 [bullet-y] ! 1 [bullet-active] ! then ;', 10
+    db ': move-bullet [bullet-active] @ if erase-bullet [bullet-y] @ 1 - [bullet-y] ! [bullet-y] @ 0 < if 0 [bullet-active] ! else draw-bullet then then ;', 10
+    db ': draw-score 83 15 0 0 screen-char 67 15 1 0 screen-char 58 15 2 0 screen-char [score] @ 10 / 48 + 15 4 0 screen-char [score] @ 10 mod 48 + 15 5 0 screen-char ;', 10
+    db ': init-game game-color screen-clear 40 [ship-x] ! 0 [score] ! 0 [game-over] ! 0 [bullet-active] ! draw-ship ;', 10
+    db ': invaders init-game begin key dup 113 = if 1 [game-over] ! then dup key-left = if ship-left then dup key-right = if ship-right then dup 32 = if fire then drop move-bullet draw-score 50 ms [game-over] @ until 15 screen-clear 0 0 screen-set ;', 10
+    db 0
 
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0

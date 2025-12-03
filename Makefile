@@ -12,7 +12,7 @@ DRIVERS_DIR = drivers
 BUILD_DIR = build
 
 # Output
-IMAGE = simplicity.img
+IMAGE = $(BUILD_DIR)/simplicity.img
 BOOT_BIN = $(BUILD_DIR)/boot.bin
 STAGE2_BIN = $(BUILD_DIR)/stage2.bin
 KERNEL_BIN = $(BUILD_DIR)/kernel.bin
