@@ -5028,8 +5028,14 @@ load_apps:
     mov rsi, serial_loading_editor
     call serial_print
 
-    ; Load embedded test code
+    ; Load embedded editor code
     mov rsi, embedded_test
+    call interpret_forth_buffer
+
+    ; Load embedded invaders code
+    mov rsi, serial_loading_invaders
+    call serial_print
+    mov rsi, embedded_invaders
     call interpret_forth_buffer
 
     ; Debug output to serial
@@ -5062,6 +5068,19 @@ embedded_test:
     db ': editor clear-editor status-line move-cursor ;', 10
     db 0
 
+; Simple invaders stub - no if-then
+embedded_invaders:
+    db '40 [ship-x] !', 10
+    db '0 [score] !', 10
+    db ': game-color 10 ;', 10
+    db ': ship-color 14 ;', 10
+    db ': ship-char 65 ;', 10
+    db ': clear-game game-color screen-clear ;', 10
+    db ': draw-ship ship-char ship-color [ship-x] @ 23 screen-char ;', 10
+    db ': status-inv 73 112 0 24 screen-char 78 112 1 24 screen-char ;', 10
+    db ': invaders clear-game draw-ship status-inv ;', 10
+    db 0
+
 embedded_editor:
     db '0 [editor-x] !', 10
     db '0 [editor-y] !', 10
@@ -5082,34 +5101,6 @@ embedded_editor:
     db ': exit-insert 0 [editor-mode] ! status-line ;', 10
     db ': editor-loop begin key [editor-mode] @ if dup key-escape = if drop exit-insert else dup 13 = if drop editor-enter else dup 32 >= over 126 <= and if insert-char else drop then then then 1 else dup 113 = if drop 0 else dup 104 = if drop editor-left 1 else dup 106 = if drop editor-down 1 else dup 107 = if drop editor-up 1 else dup 108 = if drop editor-right 1 else dup 105 = if drop enter-insert 1 else dup key-left = if drop editor-left 1 else dup key-right = if drop editor-right 1 else dup key-up = if drop editor-up 1 else dup key-down = if drop editor-down 1 else drop 1 then then then then then then then then then then then 0 = until ;', 10
     db ': editor clear-editor status-line move-cursor editor-loop 15 screen-clear 0 0 screen-set ;', 10
-    db 0
-
-embedded_invaders:
-    db '0 [ship-x] !', 10
-    db '0 [score] !', 10
-    db '0 [game-over] !', 10
-    db '0 [bullet-x] !', 10
-    db '0 [bullet-y] !', 10
-    db '0 [bullet-active] !', 10
-    db ': ship-char 65 ;', 10
-    db ': alien-char 77 ;', 10
-    db ': bullet-char 124 ;', 10
-    db ': empty-char 32 ;', 10
-    db ': game-color 10 ;', 10
-    db ': ship-color 14 ;', 10
-    db ': alien-color 12 ;', 10
-    db ': bullet-color 15 ;', 10
-    db ': draw-ship ship-char ship-color [ship-x] @ 23 screen-char ;', 10
-    db ': erase-ship empty-char game-color [ship-x] @ 23 screen-char ;', 10
-    db ': draw-bullet [bullet-active] @ if bullet-char bullet-color [bullet-x] @ [bullet-y] @ screen-char then ;', 10
-    db ': erase-bullet [bullet-active] @ if empty-char game-color [bullet-x] @ [bullet-y] @ screen-char then ;', 10
-    db ': ship-left erase-ship [ship-x] @ 1 > if [ship-x] @ 1 - [ship-x] ! then draw-ship ;', 10
-    db ': ship-right erase-ship [ship-x] @ 77 < if [ship-x] @ 1 + [ship-x] ! then draw-ship ;', 10
-    db ': fire [bullet-active] @ 0 = if [ship-x] @ [bullet-x] ! 22 [bullet-y] ! 1 [bullet-active] ! then ;', 10
-    db ': move-bullet [bullet-active] @ if erase-bullet [bullet-y] @ 1 - [bullet-y] ! [bullet-y] @ 0 < if 0 [bullet-active] ! else draw-bullet then then ;', 10
-    db ': draw-score 83 15 0 0 screen-char 67 15 1 0 screen-char 58 15 2 0 screen-char [score] @ 10 / 48 + 15 4 0 screen-char [score] @ 10 mod 48 + 15 5 0 screen-char ;', 10
-    db ': init-game game-color screen-clear 40 [ship-x] ! 0 [score] ! 0 [game-over] ! 0 [bullet-active] ! draw-ship ;', 10
-    db ': invaders init-game begin key dup 113 = if 1 [game-over] ! then dup key-left = if ship-left then dup key-right = if ship-right then dup 32 = if fire then drop move-bullet draw-score 50 ms [game-over] @ until 15 screen-clear 0 0 screen-set ;', 10
     db 0
 
 str_banner: db 'Simplicity Forth REPL v0.3', 0
