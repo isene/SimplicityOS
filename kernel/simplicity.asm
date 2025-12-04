@@ -735,6 +735,16 @@ REPL:
     ; Get word
     call parse_word         ; Returns word in RDI, length in RCX
 
+    ; DEBUG: Print after parse_word
+    push rdi
+    push rcx
+    push rsi
+    mov rsi, debug_parse_word
+    call serial_print
+    pop rsi
+    pop rcx
+    pop rdi
+
     ; Check if getting name for definition
     cmp byte [compile_mode], 2
     je .save_name
@@ -745,7 +755,51 @@ REPL:
     jnz .push_number
 
     ; Check if known word
+    ; DEBUG: Print word we're about to look up
+    push rdi
+    push rcx
+    push rsi
+    mov rsi, debug_lookup_word
+    call serial_print
+    pop rsi
+    ; Print the word itself
+    pop rcx                     ; word length
+    pop rdi                     ; word pointer
+    push rcx
+    push rdi
+    ; Print char by char
+.debug_print_word:
+    test rcx, rcx
+    jz .debug_word_done
+    mov al, [rdi]
+    call serial_putchar
+    inc rdi
+    dec rcx
+    jmp .debug_print_word
+.debug_word_done:
+    mov al, 13
+    call serial_putchar
+    mov al, 10
+    call serial_putchar
+    pop rdi
+    pop rcx
+
     call lookup_word
+
+    ; DEBUG: Print result of lookup
+    push rax
+    push rsi
+    mov rsi, debug_lookup_result
+    call serial_print
+    mov rax, [rsp+8]            ; Get saved RAX
+    call serial_print_hex
+    mov al, 13
+    call serial_putchar
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    pop rax
+
     test rax, rax
     jz .unknown_word
 
@@ -755,6 +809,21 @@ REPL:
     jns .not_immediate          ; If not negative (high bit clear), not immediate
     ; Clear the immediate flag and execute
     btr rax, 63                 ; Clear bit 63
+
+    ; Debug: Print address we're about to call
+    push rax
+    push rsi
+    mov rsi, debug_imm_call
+    call serial_print
+    mov rax, [rsp+8]            ; Get saved RAX
+    call serial_print_hex
+    mov al, 13
+    call serial_putchar
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    pop rax
+
     call rax
     jmp .parse_loop
 
@@ -3991,6 +4060,27 @@ word_key_right:
 word_if:
     ; IF - compile ZBRANCH with placeholder, push address for THEN/ELSE
     ; Must be in compile mode
+
+    ; Debug: Print entry marker
+    push rsi
+    push rax
+    mov rsi, debug_if_entry
+    call serial_print
+    ; Print RBP value
+    mov rax, rbp
+    call serial_print_hex
+    mov al, ' '
+    call serial_putchar
+    ; Print compile_ptr value
+    mov rax, [compile_ptr]
+    call serial_print_hex
+    mov al, 13
+    call serial_putchar
+    mov al, 10
+    call serial_putchar
+    pop rax
+    pop rsi
+
     cmp byte [compile_mode], 0
     je .if_error
 
@@ -4028,6 +4118,14 @@ word_else:
     cmp byte [compile_mode], 0
     je .else_error
 
+    ; Debug: print ELSE entry
+    push rsi
+    push rax
+    mov rsi, debug_else_entry
+    call serial_print
+    pop rax
+    pop rsi
+
     mov rcx, [compile_ptr]
     mov qword [rcx], BRANCH     ; Compile unconditional branch
     add rcx, 8
@@ -4035,6 +4133,18 @@ word_else:
     ; Pop IF's placeholder, push ELSE's placeholder
     add rbp, 8
     mov rbx, [rbp]              ; IF's placeholder address
+
+    ; Debug: print rbx value (IF's placeholder)
+    push rsi
+    push rax
+    mov rax, rbx
+    call serial_print_hex
+    mov al, 13
+    call serial_putchar
+    mov al, 10
+    call serial_putchar
+    pop rax
+    pop rsi
 
     mov [rbp], rcx              ; Push ELSE's placeholder address
     sub rbp, 8
@@ -4048,6 +4158,14 @@ word_else:
     sub rax, rbx
     sub rax, 8
     mov [rbx], rax
+
+    ; Debug: print ELSE done
+    push rsi
+    push rax
+    mov rsi, debug_else_done
+    call serial_print
+    pop rax
+    pop rsi
     ret
 .else_error:
     ret
@@ -4764,22 +4882,15 @@ interpret_line:
     test rax, rax
     jz .iline_unknown
 
-    ; Check for immediate words (always execute, even during compilation)
-    ; ; (semicolon) is immediate - ends compilation
-    cmp rax, word_semi
-    je .iline_exec_immediate
-    ; Control flow words are immediate - they compile code themselves
-    cmp rax, word_if
-    je .iline_exec_immediate
-    cmp rax, word_then
-    je .iline_exec_immediate
-    cmp rax, word_else
-    je .iline_exec_immediate
-    cmp rax, word_begin
-    je .iline_exec_immediate
-    cmp rax, word_until
-    je .iline_exec_immediate
+    ; Check for immediate flag (bit 63 set by lookup_word)
+    ; Immediate words are executed even during compilation
+    bt rax, 63
+    jnc .iline_not_immediate
+    ; It's immediate - clear the flag and execute
+    btr rax, 63
+    jmp .iline_exec_immediate
 
+.iline_not_immediate:
     ; Execute or compile word
     cmp byte [compile_mode], 0
     jne .iline_compile_word
@@ -4792,7 +4903,7 @@ interpret_line:
     je .iline_dict_word
 
 .iline_exec_immediate:
-    ; Built-in word - execute
+    ; Execute immediate/built-in word
     call rax
     jmp .iline_parse_loop
 
@@ -5004,6 +5115,31 @@ serial_putchar:
     pop rdx
     ret
 
+; serial_print_hex - Output 64-bit value as hex to serial port
+; Input: RAX = value to print
+serial_print_hex:
+    push rax
+    push rcx
+    push rdx
+    mov rcx, 16             ; 16 hex digits
+.hex_loop:
+    rol rax, 4              ; Rotate left 4 bits
+    push rax
+    and al, 0x0F            ; Get low 4 bits
+    add al, '0'
+    cmp al, '9'
+    jle .not_letter
+    add al, 7               ; Convert to A-F
+.not_letter:
+    call serial_putchar
+    pop rax
+    dec rcx
+    jnz .hex_loop
+    pop rdx
+    pop rcx
+    pop rax
+    ret
+
 ; serial_print - Output string to serial port
 ; Input: RSI = null-terminated string
 serial_print:
@@ -5048,14 +5184,22 @@ load_apps:
 serial_loading_editor: db 'Loading editor...', 13, 10, 0
 serial_loading_invaders: db 'Loading invaders...', 13, 10, 0
 serial_apps_done: db 'Apps loaded OK', 13, 10, 0
-
+debug_if_entry: db 'IF rbp=', 0
+debug_else_entry: db 'ELSE entry, IF placeholder=', 0
+debug_parse_word: db 'parse_word done', 13, 10, 0
+debug_lookup_word: db 'lookup: ', 0
+debug_lookup_result: db 'result: ', 0
+debug_imm_call: db 'IMM addr=', 0
+debug_else_done: db 'ELSE done', 13, 10, 0
 ; =============================================================
 ; Embedded Forth Apps
 ; =============================================================
 
-; Test first part of editor - incrementally adding lines
-; NOTE: if-then has a bug when used in embedded Forth, so using simple version
+; Test embedded Forth
 embedded_test:
+    ; Test if/then compilation
+    db ': test-if 1 if 42 then ;', 10
+    ; Variables for editor
     db '0 [editor-x] !', 10
     db '0 [editor-y] !', 10
     db '0 [editor-mode] !', 10
