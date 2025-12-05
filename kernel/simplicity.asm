@@ -5645,35 +5645,6 @@ serial_print:
     pop rsi
     ret
 
-; serial_print_hex - Output RAX as hex to serial port
-; Input: RAX = value to print
-serial_print_hex:
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    mov rcx, 16             ; 16 nibbles for 64-bit
-    mov rbx, rax
-.hex_loop:
-    rol rbx, 4              ; Rotate left to get high nibble
-    mov al, bl
-    and al, 0x0F
-    cmp al, 10
-    jl .is_digit
-    add al, 'A' - 10
-    jmp .print_hex
-.is_digit:
-    add al, '0'
-.print_hex:
-    call serial_putchar
-    dec rcx
-    jnz .hex_loop
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-    ret
-
 ; load_apps - Load embedded apps at boot
 load_apps:
     push rbx
