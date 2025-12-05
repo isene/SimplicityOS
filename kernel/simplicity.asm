@@ -4133,27 +4133,6 @@ word_key_right:
 word_if:
     ; IF - compile ZBRANCH with placeholder, push address for THEN/ELSE
     ; Must be in compile mode
-
-    ; Debug: Print entry marker
-    push rsi
-    push rax
-    mov rsi, debug_if_entry
-    call serial_print
-    ; Print RBP value
-    mov rax, rbp
-    call serial_print_hex
-    mov al, ' '
-    call serial_putchar
-    ; Print compile_ptr value
-    mov rax, [compile_ptr]
-    call serial_print_hex
-    mov al, 13
-    call serial_putchar
-    mov al, 10
-    call serial_putchar
-    pop rax
-    pop rsi
-
     cmp byte [compile_mode], 0
     je .if_error
 
@@ -4191,14 +4170,6 @@ word_else:
     cmp byte [compile_mode], 0
     je .else_error
 
-    ; Debug: print ELSE entry
-    push rsi
-    push rax
-    mov rsi, debug_else_entry
-    call serial_print
-    pop rax
-    pop rsi
-
     mov rcx, [compile_ptr]
     mov qword [rcx], BRANCH     ; Compile unconditional branch
     add rcx, 8
@@ -4206,18 +4177,6 @@ word_else:
     ; Pop IF's placeholder, push ELSE's placeholder
     add rbp, 8
     mov rbx, [rbp]              ; IF's placeholder address
-
-    ; Debug: print rbx value (IF's placeholder)
-    push rsi
-    push rax
-    mov rax, rbx
-    call serial_print_hex
-    mov al, 13
-    call serial_putchar
-    mov al, 10
-    call serial_putchar
-    pop rax
-    pop rsi
 
     mov [rbp], rcx              ; Push ELSE's placeholder address
     sub rbp, 8
@@ -4231,14 +4190,6 @@ word_else:
     sub rax, rbx
     sub rax, 8
     mov [rbx], rax
-
-    ; Debug: print ELSE done
-    push rsi
-    push rax
-    mov rsi, debug_else_done
-    call serial_print
-    pop rax
-    pop rsi
     ret
 .else_error:
     ret
@@ -5684,10 +5635,8 @@ debug_else_done: db 'ELSE done', 13, 10, 0
 ; Embedded Forth Apps
 ; =============================================================
 
-; Test embedded Forth
+; Simple embedded editor (no IF/THEN to avoid compilation issues)
 embedded_test:
-    ; Test if/then compilation
-    db ': test-if 1 if 42 then ;', 10
     ; Variables for editor
     db '0 [editor-x] !', 10
     db '0 [editor-y] !', 10
