@@ -1,4 +1,10 @@
+; Simplicity OS - 64-bit Forth Kernel
+; Loaded at 0x10000 by stage2 after mode transitions
+; Contains: REPL, all assembly primitives, and Forth interpreter
+
 [BITS 64]
+[ORG 0x10000]
+
 long_mode_64:
     ; Setup 64-bit segments
     mov ax, 0x10
@@ -2697,26 +2703,93 @@ lookup_word:
 .try_app_depth:
     ; app-depth (9 chars)
     cmp rcx, 9
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi], 'a'
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi+1], 'p'
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi+2], 'p'
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi+3], '-'
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi+4], 'd'
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi+5], 'e'
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi+6], 'p'
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi+7], 't'
-    jne .try_ed
+    jne .try_disk_read
     cmp byte [rdi+8], 'h'
-    jne .try_ed
+    jne .try_disk_read
     mov rax, word_app_depth
+    jmp .done
+
+.try_disk_read:
+    ; disk-read (9 chars) - read sector from disk
+    cmp rcx, 9
+    jne .try_disk_write
+    cmp byte [rdi], 'd'
+    jne .try_disk_write
+    cmp byte [rdi+1], 'i'
+    jne .try_disk_write
+    cmp byte [rdi+2], 's'
+    jne .try_disk_write
+    cmp byte [rdi+3], 'k'
+    jne .try_disk_write
+    cmp byte [rdi+4], '-'
+    jne .try_disk_write
+    cmp byte [rdi+5], 'r'
+    jne .try_disk_write
+    cmp byte [rdi+6], 'e'
+    jne .try_disk_write
+    cmp byte [rdi+7], 'a'
+    jne .try_disk_write
+    cmp byte [rdi+8], 'd'
+    jne .try_disk_write
+    mov rax, word_disk_read
+    jmp .done
+
+.try_disk_write:
+    ; disk-write (10 chars) - write sector to disk
+    cmp rcx, 10
+    jne .try_ed
+    cmp byte [rdi], 'd'
+    jne .try_ed
+    cmp byte [rdi+1], 'i'
+    jne .try_ed
+    cmp byte [rdi+2], 's'
+    jne .try_ed
+    cmp byte [rdi+3], 'k'
+    jne .try_ed
+    cmp byte [rdi+4], '-'
+    jne .try_ed
+    cmp byte [rdi+5], 'w'
+    jne .try_ed
+    cmp byte [rdi+6], 'r'
+    jne .try_ed
+    cmp byte [rdi+7], 'i'
+    jne .try_ed
+    cmp byte [rdi+8], 't'
+    jne .try_ed
+    cmp byte [rdi+9], 'e'
+    jne .try_load
+    mov rax, word_disk_write
+    jmp .done
+
+.try_load:
+    ; load (4 chars) - load and run Forth app from disk
+    cmp rcx, 4
+    jne .try_ed
+    cmp byte [rdi], 'l'
+    jne .try_ed
+    cmp byte [rdi+1], 'o'
+    jne .try_ed
+    cmp byte [rdi+2], 'a'
+    jne .try_ed
+    cmp byte [rdi+3], 'd'
+    jne .try_ed
+    mov rax, word_load
     jmp .done
 
 .try_ed:
@@ -3824,7 +3897,7 @@ word_screen_set:
     sub r15, 8
     cmp r15, forth_stack
     jle .ss_empty
-    mov r14, [r15-8]
+    mov r14, [r15]          ; Fixed: was [r15-8]
     ret
 .ss_empty:
     mov r15, forth_stack
@@ -3856,7 +3929,7 @@ word_screen_char:
     sub r15, 8
     cmp r15, forth_stack
     jle .sc_empty
-    mov r14, [r15-8]
+    mov r14, [r15]          ; Fixed: was [r15-8]
     ret
 .sc_empty:
     mov r15, forth_stack
@@ -3895,7 +3968,7 @@ word_screen_clear:
     sub r15, 8
     cmp r15, forth_stack
     jle .scl_empty
-    mov r14, [r15-8]
+    mov r14, [r15]          ; Fixed: was [r15-8]
     ret
 .scl_empty:
     mov r15, forth_stack
@@ -4376,6 +4449,422 @@ word_app_depth:
 str_not_in_app: db '(not in app)', 0
 
 ; ============================================================
+; DISK I/O - IDE PIO mode disk access
+; ============================================================
+; disk-read ( sector addr -- ) - Read 512 bytes from sector to address
+; disk-write ( addr sector -- ) - Write 512 bytes from address to sector
+; Uses primary IDE controller at ports 0x1F0-0x1F7
+; ============================================================
+
+; IDE port definitions
+IDE_DATA        equ 0x1F0
+IDE_SECTOR_CNT  equ 0x1F2
+IDE_LBA_LOW     equ 0x1F3
+IDE_LBA_MID     equ 0x1F4
+IDE_LBA_HIGH    equ 0x1F5
+IDE_DRIVE_HEAD  equ 0x1F6
+IDE_STATUS      equ 0x1F7
+IDE_COMMAND     equ 0x1F7
+
+IDE_CMD_READ    equ 0x20
+IDE_CMD_WRITE   equ 0x30
+
+; word_disk_read - Read 512 bytes from disk sector
+; Stack: ( sector addr -- )
+word_disk_read:
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+
+    ; Get addr from TOS (r14), sector from second (stack)
+    mov rdi, r14            ; addr
+    sub r15, 8
+    mov rax, [r15]          ; sector
+    mov r14, [r15-8]        ; new TOS (or garbage if stack empty)
+
+    ; Wait for drive ready
+    mov dx, IDE_STATUS
+.dr_wait_ready:
+    in al, dx
+    test al, 0x80           ; BSY bit
+    jnz .dr_wait_ready
+
+    ; Set up LBA addressing
+    mov dx, IDE_SECTOR_CNT
+    mov al, 1               ; Read 1 sector
+    out dx, al
+
+    mov dx, IDE_LBA_LOW
+    mov ecx, eax            ; Save sector number
+    out dx, al              ; LBA bits 0-7
+
+    mov dx, IDE_LBA_MID
+    mov al, ah
+    out dx, al              ; LBA bits 8-15
+
+    mov dx, IDE_LBA_HIGH
+    shr ecx, 16
+    mov al, cl
+    out dx, al              ; LBA bits 16-23
+
+    mov dx, IDE_DRIVE_HEAD
+    mov al, 0xE0            ; LBA mode, master drive
+    or al, ch               ; LBA bits 24-27 (in low nibble)
+    and al, 0xEF            ; Ensure only bits 0-3 used
+    out dx, al
+
+    ; Send read command
+    mov dx, IDE_COMMAND
+    mov al, IDE_CMD_READ
+    out dx, al
+
+    ; Wait for data ready
+    mov dx, IDE_STATUS
+.dr_wait_drq:
+    in al, dx
+    test al, 0x01           ; ERR bit
+    jnz .dr_error
+    test al, 0x08           ; DRQ bit
+    jz .dr_wait_drq
+
+    ; Read 256 words (512 bytes)
+    mov dx, IDE_DATA
+    mov rcx, 256
+.dr_read_loop:
+    in ax, dx
+    stosw                   ; Store word, advance rdi
+    dec rcx
+    jnz .dr_read_loop
+
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+.dr_error:
+    ; On error, fill with zeros
+    xor eax, eax
+    mov rcx, 256
+    rep stosw
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; word_disk_write - Write 512 bytes to disk sector
+; Stack: ( addr sector -- )
+word_disk_write:
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+
+    ; Get sector from TOS (r14), addr from second (stack)
+    mov rax, r14            ; sector
+    sub r15, 8
+    mov rsi, [r15]          ; addr
+    mov r14, [r15-8]        ; new TOS (or garbage if stack empty)
+
+    ; Wait for drive ready
+    mov dx, IDE_STATUS
+.dw_wait_ready:
+    in al, dx
+    test al, 0x80           ; BSY bit
+    jnz .dw_wait_ready
+
+    mov ecx, eax            ; Save sector number
+
+    ; Set up LBA addressing
+    mov dx, IDE_SECTOR_CNT
+    mov al, 1               ; Write 1 sector
+    out dx, al
+
+    mov dx, IDE_LBA_LOW
+    mov eax, ecx
+    out dx, al              ; LBA bits 0-7
+
+    mov dx, IDE_LBA_MID
+    mov al, ah
+    out dx, al              ; LBA bits 8-15
+
+    mov dx, IDE_LBA_HIGH
+    shr eax, 16
+    out dx, al              ; LBA bits 16-23
+
+    mov dx, IDE_DRIVE_HEAD
+    mov al, 0xE0            ; LBA mode, master drive
+    shr eax, 8
+    and al, 0x0F            ; LBA bits 24-27
+    or al, 0xE0
+    out dx, al
+
+    ; Send write command
+    mov dx, IDE_COMMAND
+    mov al, IDE_CMD_WRITE
+    out dx, al
+
+    ; Wait for drive ready to accept data
+    mov dx, IDE_STATUS
+.dw_wait_drq:
+    in al, dx
+    test al, 0x01           ; ERR bit
+    jnz .dw_error
+    test al, 0x08           ; DRQ bit
+    jz .dw_wait_drq
+
+    ; Write 256 words (512 bytes)
+    mov dx, IDE_DATA
+    mov rcx, 256
+.dw_write_loop:
+    lodsw                   ; Load word from rsi, advance rsi
+    out dx, ax
+    dec rcx
+    jnz .dw_write_loop
+
+    ; Flush cache
+    mov dx, IDE_COMMAND
+    mov al, 0xE7            ; CACHE FLUSH command
+    out dx, al
+
+    ; Wait for completion
+    mov dx, IDE_STATUS
+.dw_wait_flush:
+    in al, dx
+    test al, 0x80           ; BSY bit
+    jnz .dw_wait_flush
+
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+.dw_error:
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; ============================================================
+; LOAD - Load and run Forth app from disk
+; Stack: ( name-string -- )
+; Reads app directory from sector 200, finds app, loads and runs
+; ============================================================
+; Directory entry format (16 bytes):
+;   [name: 12 bytes null-padded]
+;   [start_sector: 2 bytes LE]
+;   [length_sectors: 2 bytes LE]
+; ============================================================
+
+APP_DIR_SECTOR  equ 200
+APP_BUFFER_ADDR equ 0x300000    ; 3MB - buffer for loading apps
+
+word_load:
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+    push rsi
+    push r12
+    push r13
+
+    ; Get app name string from TOS
+    mov r12, r14                ; r12 = STRING object address
+    sub r15, 8
+    mov r14, [r15-8]            ; Pop, get new TOS
+
+    ; Validate it's a string object
+    mov rax, [r12]              ; Get type header
+    cmp al, TYPE_STRING
+    jne .load_error
+
+    ; Get string data pointer (skip 16-byte header)
+    lea r13, [r12 + 16]         ; r13 = pointer to name chars
+
+    ; Read app directory sector (200) into load buffer
+    mov rax, APP_DIR_SECTOR
+    mov rdi, APP_BUFFER_ADDR
+    call read_sector_to_addr
+
+    ; Search directory for matching app name
+    mov rbx, APP_BUFFER_ADDR    ; rbx = current directory entry
+    mov rcx, 32                 ; max 32 entries per sector
+
+.search_loop:
+    ; Check if entry is empty (first byte = 0)
+    cmp byte [rbx], 0
+    je .not_found
+
+    ; Compare name (up to 12 chars)
+    push rcx
+    mov rsi, r13                ; App name we're looking for
+    mov rdi, rbx                ; Directory entry name
+    mov rcx, 12
+.cmp_name:
+    mov al, [rsi]
+    mov ah, [rdi]
+    cmp al, 0                   ; End of search name?
+    je .name_match_check
+    cmp al, ah
+    jne .next_entry
+    inc rsi
+    inc rdi
+    dec rcx
+    jnz .cmp_name
+    jmp .name_match_check
+
+.name_match_check:
+    ; If we got here, names match (or search name ended)
+    ; Check that entry name also ends or matches
+    cmp ah, 0
+    je .found
+    cmp ah, ' '                 ; Space padding also OK
+    je .found
+
+.next_entry:
+    pop rcx
+    add rbx, 16                 ; Next entry
+    dec rcx
+    jnz .search_loop
+
+.not_found:
+    ; Print error
+    mov rax, str_app_not_found
+    call print_string
+    jmp .load_done
+
+.found:
+    pop rcx                     ; Clean up saved rcx
+
+    ; Get start sector and length from entry
+    movzx rax, word [rbx + 12]  ; Start sector
+    movzx rcx, word [rbx + 14]  ; Length in sectors
+
+    ; Load app sectors into buffer
+    mov rdi, APP_BUFFER_ADDR
+.load_sectors:
+    push rcx
+    push rdi
+    push rax
+    call read_sector_to_addr
+    pop rax
+    pop rdi
+    pop rcx
+    inc rax                     ; Next sector
+    add rdi, 512                ; Advance buffer
+    dec rcx
+    jnz .load_sectors
+
+    ; Null-terminate the loaded code
+    mov byte [rdi], 0
+
+    ; Print loading message
+    mov rax, str_loading_app
+    call print_string
+    mov rax, r13                ; App name (null-terminated)
+    call print_string
+    call newline
+
+    ; Interpret the loaded Forth source
+    mov rsi, APP_BUFFER_ADDR
+    call interpret_forth_buffer
+
+.load_done:
+    pop r13
+    pop r12
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+.load_error:
+    mov rax, str_load_error
+    call print_string
+    jmp .load_done
+
+; Helper: Read sector to address
+; Input: RAX = sector, RDI = destination address
+read_sector_to_addr:
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+
+    ; Wait for drive ready
+    mov dx, IDE_STATUS
+.rsta_wait:
+    in al, dx
+    test al, 0x80
+    jnz .rsta_wait
+    test al, 0x40
+    jz .rsta_wait
+
+    ; Set up LBA
+    mov rbx, rax                ; Save sector number
+    mov dx, IDE_SECTOR_CNT
+    mov al, 1
+    out dx, al
+
+    mov dx, IDE_LBA_LOW
+    mov rax, rbx
+    out dx, al
+
+    mov dx, IDE_LBA_MID
+    mov al, ah
+    out dx, al
+
+    mov dx, IDE_LBA_HIGH
+    shr rax, 16
+    out dx, al
+
+    mov dx, IDE_DRIVE_HEAD
+    shr rax, 8
+    and al, 0x0F
+    or al, 0xE0
+    out dx, al
+
+    ; Send read command
+    mov dx, IDE_COMMAND
+    mov al, IDE_CMD_READ
+    out dx, al
+
+    ; Wait for data ready
+    mov dx, IDE_STATUS
+.rsta_wait_data:
+    in al, dx
+    test al, 0x80
+    jnz .rsta_wait_data
+    test al, 0x08
+    jz .rsta_wait_data
+
+    ; Read 256 words
+    pop rdi
+    push rdi
+    mov dx, IDE_DATA
+    mov rcx, 256
+.rsta_read_loop:
+    in ax, dx
+    stosw
+    dec rcx
+    jnz .rsta_read_loop
+
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+str_app_not_found: db 'App not found', 13, 10, 0
+str_loading_app: db 'Loading app: ', 0
+str_load_error: db 'Error: expected string', 13, 10, 0
+
+; ============================================================
 ; ED - Mini text editor (vim-like)
 ; Demonstrates: app isolation, screen control, keyboard input,
 ;               control flow, and the pure data model
@@ -4693,7 +5182,7 @@ word_words:
     mov r14, rax
     ret
 
-str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* ed ', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write ed ', 0
 
 word_forget:
     ; Simplified FORGET - just removes latest word
@@ -5156,6 +5645,35 @@ serial_print:
     pop rsi
     ret
 
+; serial_print_hex - Output RAX as hex to serial port
+; Input: RAX = value to print
+serial_print_hex:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    mov rcx, 16             ; 16 nibbles for 64-bit
+    mov rbx, rax
+.hex_loop:
+    rol rbx, 4              ; Rotate left to get high nibble
+    mov al, bl
+    and al, 0x0F
+    cmp al, 10
+    jl .is_digit
+    add al, 'A' - 10
+    jmp .print_hex
+.is_digit:
+    add al, '0'
+.print_hex:
+    call serial_putchar
+    dec rcx
+    jnz .hex_loop
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
 ; load_apps - Load embedded apps at boot
 load_apps:
     push rbx
@@ -5297,7 +5815,5 @@ cursor: dq 0xB8000 + 160
 
 ; Dictionary space (4KB for user-defined words)
 dictionary_space: times 4096 db 0
-
-; GDT is now defined in stage2.asm (must be < 32KB from load point)
 
 msg64: db 'Simplicity OS v0.2 - 64-bit Forth', 0
