@@ -673,6 +673,16 @@ REPL:
     call load_apps
 
 .main_loop:
+    ; Debug: print compile_mode at start of loop
+    push rax
+    mov rsi, debug_compile_mode_msg
+    call serial_print
+    movzx rax, byte [compile_mode]
+    call serial_print_hex
+    mov al, 10
+    call serial_putchar
+    pop rax
+
     ; Print prompt
     mov rax, str_prompt
     call print_string
@@ -5453,6 +5463,7 @@ debug_imm_call: db 'IMM addr=', 0
 debug_else_done: db 'ELSE done', 13, 10, 0
 debug_unknown_word: db 'Unknown: ', 0
 debug_semicolon: db 'Created word: ', 0
+debug_compile_mode_msg: db '[compile_mode=', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
