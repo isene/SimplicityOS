@@ -3409,7 +3409,17 @@ word_emit:
     push rax
     call serial_putchar
     pop rax
+    ; Check if newline (10)
+    cmp rax, 10
+    je .emit_newline
+    ; Regular character
     call emit_char
+    sub r15, 8
+    mov r14, [r15]          ; Load new TOS
+    ret
+.emit_newline:
+    ; Call proper newline function
+    call newline
     sub r15, 8
     mov r14, [r15]          ; Load new TOS
     ret
