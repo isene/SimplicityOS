@@ -9,6 +9,3 @@
   "Welcome to Simplicity OS!" type cr
   "This app was loaded from disk sectors." type cr
 ;
-
-\ Auto-run on load
-hello
