@@ -1403,11 +1403,11 @@ lookup_word:
 
 .try_cr:
     cmp rcx, 2
-    jne .try_words
+    jne .try_exit
     cmp byte [rdi], 'c'
-    jne .try_words
+    jne .try_exit
     cmp byte [rdi+1], 'r'
-    jne .try_words
+    jne .try_exit
     mov rax, word_cr
     jmp .done
 
