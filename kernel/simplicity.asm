@@ -4915,11 +4915,13 @@ interpret_forth_buffer:
     ret
 
 ; interpret_line - Interpret tokens from RSI until null
-; Reuses existing parse/interpret logic
+; Returns: RAX = 1 on success, 0 on error
 interpret_line:
     push rbx
     push r13
+    push r12
     mov r13, rsi                ; Save source pointer
+    mov r12, 1                  ; R12 = success flag (1=ok, 0=error)
 
 .iline_parse_loop:
     mov rsi, r13
@@ -5072,11 +5074,9 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_unknown:
-    ; Unknown word - set error flag and return
-    pop r13
-    pop rbx
-    xor rax, rax                ; Return 0 = error
-    ret
+    ; Unknown word - set error flag
+    mov r12, 0                  ; Error!
+    jmp .iline_parse_loop
 
 .iline_skip_comment:
     ; Skip until )
@@ -5248,9 +5248,10 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_done:
+    mov rax, r12                ; Return success flag
+    pop r12
     pop r13
     pop rbx
-    mov rax, 1                  ; Return 1 = success
     ret
 
 ; exec_definition - Execute a colon definition
