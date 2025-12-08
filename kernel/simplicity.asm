@@ -4759,6 +4759,26 @@ word_semi:
     ; End compilation mode
     mov byte [compile_mode], 0
 
+    ; Debug: show what's in compile buffer
+    push rax
+    push rbx
+    push rsi
+    mov rsi, debug_semi_buffer_msg
+    call serial_print
+    mov rax, [compile_ptr]
+    sub rax, compile_buffer
+    shr rax, 3                  ; Count of qwords
+    call serial_print_hex
+    mov rsi, debug_semi_name_msg
+    call serial_print
+    mov rsi, new_word_name
+    call serial_print
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    pop rbx
+    pop rax
+
     ; Create dictionary entry
     call create_dict_entry
     ret
@@ -5475,6 +5495,8 @@ debug_unknown_word: db 'Unknown: ', 0
 debug_semicolon: db 'Created word: ', 0
 debug_compile_mode_msg: db '[compile_mode=', 0
 debug_boot_line_msg: db 'BOOT: ', 0
+debug_semi_buffer_msg: db '; compiled=', 0
+debug_semi_name_msg: db ' name=', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
