@@ -3,4 +3,7 @@
 
 : hello "Hello from disk!" . cr ;
 
-: greet "Welcome to Simplicity OS!" . cr "This app was loaded from disk sectors." . cr ;
+: greet
+  "Welcome to Simplicity OS!" . cr
+  "Loaded from disk sectors." . cr
+;
