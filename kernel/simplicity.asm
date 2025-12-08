@@ -4994,6 +4994,22 @@ interpret_line:
 
     ; Check if dictionary word
     push rax
+    push rsi
+    mov rsi, debug_check_docol_msg
+    call serial_print
+    mov rax, [rsp+8]
+    call serial_print_hex
+    mov rsi, debug_check_docol_val_msg
+    call serial_print
+    mov rax, [rsp+8]
+    mov rbx, [rax]
+    mov rax, rbx
+    call serial_print_hex
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    pop rax
+    push rax
     mov rbx, [rax]
     cmp rbx, DOCOL
     pop rax
@@ -5566,6 +5582,8 @@ debug_semi_code_msg: db '  code: ', 0
 debug_exec_word_msg: db 'EXEC: ', 0
 debug_dict_latest_msg: db '  dict_latest=', 0
 debug_dict_name_msg: db '  dict entry: len=', 0
+debug_check_docol_msg: db 'CHECK addr=', 0
+debug_check_docol_val_msg: db ' val=', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
