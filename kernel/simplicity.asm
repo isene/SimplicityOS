@@ -5364,9 +5364,25 @@ interpret_line:
     cmp byte [rsi], '('
     je .iline_skip_comment
 
+    ; Check for tick (~) - get reference to next word
+    cmp byte [rsi], 126         ; Tilde
+    je .iline_handle_tick
+
+    ; Check for quote (") - string literal
+    cmp byte [rsi], 34          ; Double quote
+    je .iline_handle_string
+
     ; Check for bracket [name] - named variable access
     cmp byte [rsi], '['
     je .iline_handle_bracket
+
+    ; Check for array literal start {
+    cmp byte [rsi], '{'
+    je .iline_handle_array_start
+
+    ; Check for array literal end }
+    cmp byte [rsi], '}'
+    je .iline_handle_array_end
 
     ; Get word using parse_word
     call parse_word             ; RDI = word start, RCX = length
@@ -5535,6 +5551,125 @@ interpret_line:
     mov [rbx+8], rax
     add rbx, 16
     mov [compile_ptr], rbx
+    jmp .iline_parse_loop
+
+.iline_handle_tick:
+    ; Tick (~) - get reference to next word
+    inc r13                     ; Skip ~
+    mov rsi, r13
+    call skip_spaces
+    mov r13, rsi
+    call parse_word             ; RDI = word, RCX = length
+    mov r13, rsi
+    call lookup_word
+    test rax, rax
+    jz .iline_parse_loop        ; Unknown word, skip
+    ; Push reference
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    jmp .iline_parse_loop
+
+.iline_handle_string:
+    ; String literal
+    inc r13                     ; Skip opening quote
+    mov rsi, r13
+    ; Count length
+    push rsi
+    xor rcx, rcx
+.iline_count_str:
+    mov al, [rsi]
+    test al, al
+    jz .iline_str_counted
+    cmp al, 34                  ; Closing quote?
+    je .iline_str_counted
+    inc rsi
+    inc rcx
+    jmp .iline_count_str
+.iline_str_counted:
+    pop rsi
+    ; Allocate STRING object
+    push rcx
+    add rcx, 17                 ; Header + null
+    call allocate_object
+    pop rcx
+    ; Fill header
+    mov qword [rax], TYPE_STRING
+    mov [rax+8], rcx
+    ; Copy string
+    lea rdi, [rax+16]
+    mov rbx, r13
+.iline_copy_str:
+    mov r8b, [rbx]
+    test r8b, r8b
+    jz .iline_str_done
+    inc rbx
+    cmp r8b, 34                 ; Closing quote?
+    je .iline_str_done
+    mov [rdi], r8b
+    inc rdi
+    jmp .iline_copy_str
+.iline_str_done:
+    mov byte [rdi], 0
+    mov r13, rbx                ; Update position
+    ; Check compile mode
+    cmp byte [compile_mode], 0
+    jne .iline_compile_string
+    ; Push to stack
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    jmp .iline_parse_loop
+.iline_compile_string:
+    ; Compile LIT + string address
+    mov rbx, [compile_ptr]
+    mov qword [rbx], LIT
+    mov [rbx+8], rax
+    add rbx, 16
+    mov [compile_ptr], rbx
+    jmp .iline_parse_loop
+
+.iline_handle_array_start:
+    ; { - Save marker on return stack
+    inc r13                     ; Skip {
+    mov [rbp], r15
+    sub rbp, 8
+    jmp .iline_parse_loop
+
+.iline_handle_array_end:
+    ; } - Create array from marker
+    inc r13                     ; Skip }
+    add rbp, 8
+    mov rbx, [rbp]              ; Get marker
+    ; Count elements
+    mov rcx, r15
+    sub rcx, rbx
+    shr rcx, 3                  ; Divide by 8
+    ; Allocate array
+    push rcx
+    push rbx
+    shl rcx, 3
+    add rcx, 16                 ; Header
+    call allocate_object
+    pop rbx
+    pop rcx
+    ; Fill header
+    mov qword [rax], TYPE_ARRAY
+    mov [rax+8], rcx
+    ; Copy elements
+    lea rdi, [rax+16]
+    mov rsi, rbx
+.iline_copy_arr:
+    test rcx, rcx
+    jz .iline_arr_done
+    movsq
+    dec rcx
+    jmp .iline_copy_arr
+.iline_arr_done:
+    mov r15, rbx                ; Reset stack
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
     jmp .iline_parse_loop
 
 .iline_done:
