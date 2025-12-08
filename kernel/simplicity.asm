@@ -2079,8 +2079,9 @@ lookup_word:
     jmp .done
 
 .try_screen_get:
+    ; Check if word starts with "screen-" (7 chars)
     cmp rcx, 10
-    jne .try_see
+    jl .try_see              ; Too short to be screen-*
     cmp byte [rdi], 's'
     jne .try_see
     cmp byte [rdi+1], 'c'
@@ -2095,62 +2096,69 @@ lookup_word:
     jne .try_see
     cmp byte [rdi+6], '-'
     jne .try_see
-    ; Check which screen word: get, set, char, clear, scroll
-    cmp byte [rdi+7], 'g'
-    jne .try_screen_set
-    cmp byte [rdi+8], 'e'
-    jne .try_screen_set
-    cmp byte [rdi+9], 't'
-    jne .try_screen_set
-    mov rax, word_screen_get
-    jmp .done
 
-.try_screen_set:
+    ; Has screen- prefix, check which variant
+    cmp rcx, 10
+    je .check_screen_get_set
+    cmp rcx, 11
+    je .check_screen_char
+    cmp rcx, 12
+    je .check_screen_clear
+    cmp rcx, 13
+    je .check_screen_scroll
+    jmp .try_see             ; Unknown screen-* length
+
+.check_screen_get_set:
+    ; Could be screen-get or screen-set (both 10 chars)
+    cmp byte [rdi+7], 'g'
+    je .is_screen_get
     cmp byte [rdi+7], 's'
-    jne .try_screen_char
+    jne .try_see
     cmp byte [rdi+8], 'e'
-    jne .try_screen_char
+    jne .try_see
     cmp byte [rdi+9], 't'
-    jne .try_screen_char
+    jne .try_see
     mov rax, word_screen_set
     jmp .done
 
-.try_screen_char:
+.is_screen_get:
+    cmp byte [rdi+8], 'e'
+    jne .try_see
+    cmp byte [rdi+9], 't'
+    jne .try_see
+    mov rax, word_screen_get
+    jmp .done
+
+.check_screen_char:
     ; screen-char (11 chars)
-    cmp rcx, 11
-    jne .try_screen_clear
     cmp byte [rdi+7], 'c'
-    jne .try_screen_clear
+    jne .try_see
     cmp byte [rdi+8], 'h'
-    jne .try_screen_clear
+    jne .try_see
     cmp byte [rdi+9], 'a'
-    jne .try_screen_clear
+    jne .try_see
     cmp byte [rdi+10], 'r'
-    jne .try_screen_clear
+    jne .try_see
     mov rax, word_screen_char
     jmp .done
 
-.try_screen_clear:
+.check_screen_clear:
     ; screen-clear (12 chars)
-    cmp rcx, 12
-    jne .try_screen_scroll
     cmp byte [rdi+7], 'c'
-    jne .try_screen_scroll
+    jne .try_see
     cmp byte [rdi+8], 'l'
-    jne .try_screen_scroll
+    jne .try_see
     cmp byte [rdi+9], 'e'
-    jne .try_screen_scroll
+    jne .try_see
     cmp byte [rdi+10], 'a'
-    jne .try_screen_scroll
+    jne .try_see
     cmp byte [rdi+11], 'r'
-    jne .try_screen_scroll
+    jne .try_see
     mov rax, word_screen_clear
     jmp .done
 
-.try_screen_scroll:
+.check_screen_scroll:
     ; screen-scroll (13 chars)
-    cmp rcx, 13
-    jne .try_see
     cmp byte [rdi+7], 's'
     jne .try_see
     cmp byte [rdi+8], 'c'
