@@ -1411,6 +1411,20 @@ lookup_word:
     mov rax, word_cr
     jmp .done
 
+.try_exit:
+    cmp rcx, 4
+    jne .try_words
+    cmp byte [rdi], 'e'
+    jne .try_words
+    cmp byte [rdi+1], 'x'
+    jne .try_words
+    cmp byte [rdi+2], 'i'
+    jne .try_words
+    cmp byte [rdi+3], 't'
+    jne .try_words
+    mov rax, word_exit
+    jmp .done
+
 .try_words:
     cmp rcx, 5
     jne .try_forget
@@ -2867,6 +2881,25 @@ word_cr:
     ; Newline (doesn't consume stack)
     call newline
     ret
+
+word_exit:
+    ; Exit SimplicityOS cleanly
+    ; Print goodbye message
+    push rax
+    mov rax, str_goodbye
+    call print_string
+    call newline
+    pop rax
+
+    ; ACPI shutdown for QEMU (port 0x604, value 0x2000)
+    mov dx, 0x604
+    mov ax, 0x2000
+    out dx, ax
+
+    ; Fallback: halt loop if shutdown fails
+.halt:
+    hlt
+    jmp .halt
 
 word_fetch:
     ; Fetch: TOS is address, replace with value at address
@@ -5423,6 +5456,7 @@ debug_semicolon: db 'Created word: ', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
+str_goodbye: db 'Goodbye!', 0
 str_unknown: db ' ?', 0
 
 input_buffer: times 80 db 0
