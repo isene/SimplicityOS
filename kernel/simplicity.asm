@@ -161,8 +161,19 @@ BRANCH:
 
 ZBRANCH:
     ; Branch if TOS is zero - offset in next cell
-    lodsq                   ; Get offset
-    pop rbx                 ; Get TOS
+    ; Uses R14/R15 stack model: R14 = TOS, R15 = stack pointer
+    lodsq                   ; Get offset into RAX
+    mov rbx, r14            ; Save TOS for test
+    ; Pop TOS using R14/R15 convention
+    sub r15, 8
+    cmp r15, forth_stack
+    jl .zbranch_empty_prim  ; Use jl not jle - R15==forth_stack means valid element at [R15]
+    mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
+    jmp .zbranch_test_prim
+.zbranch_empty_prim:
+    mov r15, forth_stack
+    xor r14, r14
+.zbranch_test_prim:
     test rbx, rbx
     jz .do_branch
     jmp NEXT                ; Non-zero, don't branch
@@ -874,8 +885,9 @@ REPL:
 
     ; It's LIT - next qword is the number
     lodsq
-    mov [r15], rax
+    mov [r15], r14      ; Save old TOS to memory
     add r15, 8
+    mov r14, rax        ; New value becomes TOS
     jmp .exec_def
 
 .not_lit:
@@ -1440,11 +1452,41 @@ DOCOL:
     cmp rax, LIT
     jne .not_lit
     lodsq                   ; Get literal value
-    mov [r15], rax          ; Push to stack
+    mov [r15], r14          ; Save old TOS to memory
     add r15, 8
+    mov r14, rax            ; New value becomes TOS
     jmp .exec_loop
 
 .not_lit:
+    ; Check for BRANCH (unconditional jump)
+    cmp rax, BRANCH
+    jne .not_branch
+    lodsq                   ; Get offset
+    add rsi, rax            ; Jump
+    jmp .exec_loop
+
+.not_branch:
+    ; Check for ZBRANCH (branch if zero)
+    cmp rax, ZBRANCH
+    jne .do_call
+    lodsq                   ; Get offset
+    mov rbx, r14            ; Get TOS
+    ; Pop TOS using R14/R15 convention
+    sub r15, 8
+    cmp r15, forth_stack
+    jl .zbranch_empty_docol ; Use jl not jle - R15==forth_stack means valid element at [R15]
+    mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
+    jmp .zbranch_test
+.zbranch_empty_docol:
+    mov r15, forth_stack
+    xor r14, r14
+.zbranch_test:
+    test rbx, rbx
+    jnz .exec_loop          ; Non-zero, don't branch
+    add rsi, rax            ; Zero, take branch
+    jmp .exec_loop
+
+.do_call:
     ; Call the word
     call rax
     jmp .exec_loop
@@ -1807,7 +1849,7 @@ lookup_word:
     jmp .done
 .found_semi:
     mov rax, word_semi
-    jmp .done
+    jmp .done_immediate    ; ';' is IMMEDIATE - must execute during compile mode
 .found_fetch:
     mov rax, word_fetch
     jmp .done
@@ -3355,6 +3397,10 @@ word_over:
 word_emit:
     ; Emit character from TOS
     mov rax, r14
+    ; Also output to serial for debugging
+    push rax
+    call serial_putchar
+    pop rax
     call emit_char
     sub r15, 8
     mov r14, [r15]          ; Load new TOS
@@ -3518,11 +3564,11 @@ word_execute:
     ; ZBRANCH - branch if TOS is zero
     lodsq                   ; Get offset
     mov rbx, r14            ; Get TOS
-    ; Pop TOS
+    ; Pop TOS using R14/R15 convention
     sub r15, 8
     cmp r15, forth_stack
-    jle .zbranch_empty
-    mov r14, [r15-8]
+    jl .zbranch_empty       ; Use jl not jle - R15==forth_stack means valid element at [R15]
+    mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
     jmp .zbranch_check
 .zbranch_empty:
     mov r15, forth_stack
@@ -4747,6 +4793,9 @@ read_sector_to_addr:
     push rdx
     push rdi
 
+    ; Save sector number BEFORE status reads corrupt AL
+    mov rbx, rax
+
     ; Wait for drive ready
     mov dx, IDE_STATUS
 .rsta_wait:
@@ -4756,8 +4805,7 @@ read_sector_to_addr:
     test al, 0x40
     jz .rsta_wait
 
-    ; Set up LBA
-    mov rbx, rax                ; Save sector number
+    ; Set up LBA (sector number is in RBX)
     mov dx, IDE_SECTOR_CNT
     mov al, 1
     out dx, al
@@ -4813,6 +4861,7 @@ read_sector_to_addr:
 
 str_app_not_found: db 'App not found', 13, 10, 0
 str_loading_app: db 'Loading app: ', 0
+str_sector200_debug: db 'Sector200: ', 0
 str_load_error: db 'Error: expected string', 13, 10, 0
 
 ; ============================================================
@@ -5381,6 +5430,9 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_push_number:
+    ; Parse the actual number value (RDI=word start, RCX=length still valid)
+    call parse_number           ; Convert string to number in RAX
+
     ; Check if compiling
     cmp byte [compile_mode], 0
     jne .iline_compile_number
@@ -5414,7 +5466,7 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_unknown:
-    ; Unknown word - ignore silently during boot
+    ; Unknown word - ignore silently
     jmp .iline_parse_loop
 
 .iline_skip_comment:
@@ -5596,33 +5648,176 @@ serial_print:
     pop rsi
     ret
 
-; load_apps - Load embedded apps at boot
+; load_apps - Load apps from disk at boot
+; Uses the disk catalog at sector 200 to load Forth apps
 load_apps:
     push rbx
+    push r12
+    push r13
 
-    ; Debug output to serial
+    ; Load editor
     mov rsi, serial_loading_editor
     call serial_print
+    mov rsi, app_name_editor
+    call load_app_by_cstring
 
-    ; Load embedded editor code
-    mov rsi, embedded_test
-    call interpret_forth_buffer
-
-    ; Load embedded invaders code
+    ; Load invaders
     mov rsi, serial_loading_invaders
     call serial_print
-    mov rsi, embedded_invaders
-    call interpret_forth_buffer
+    mov rsi, app_name_invaders
+    call load_app_by_cstring
 
-    ; Debug output to serial
+    ; Load hello
+    mov rsi, serial_loading_hello
+    call serial_print
+    mov rsi, app_name_hello
+    call load_app_by_cstring
+
+    ; Load test
+    mov rsi, serial_loading_test
+    call serial_print
+    mov rsi, app_name_test
+    call load_app_by_cstring
+
+    ; Done
     mov rsi, serial_apps_done
     call serial_print
 
+    pop r13
+    pop r12
     pop rbx
     ret
 
+; App names for boot loading
+app_name_editor: db 'editor', 0
+app_name_invaders: db 'invaders', 0
+app_name_hello: db 'hello', 0
+app_name_test: db 'test', 0
+
+; load_app_by_cstring - Load app by C string name (for boot time)
+; Input: RSI = pointer to null-terminated app name
+; Uses disk catalog at sector 200
+load_app_by_cstring:
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+    push rsi
+    push r12
+    push r13
+
+    mov r13, rsi                ; r13 = app name
+
+    ; Read app directory sector (200) into load buffer
+    mov rax, APP_DIR_SECTOR
+    mov rdi, APP_BUFFER_ADDR
+    call read_sector_to_addr
+
+    ; DEBUG: Print what we read from sector 200
+    push rsi
+    mov rsi, str_sector200_debug
+    call serial_print
+    mov rax, [APP_BUFFER_ADDR]       ; First 8 bytes
+    call serial_print_hex
+    mov al, ' '
+    call serial_putchar
+    mov rax, [APP_BUFFER_ADDR + 8]   ; Next 8 bytes
+    call serial_print_hex
+    mov al, 13
+    call serial_putchar
+    mov al, 10
+    call serial_putchar
+    pop rsi
+
+    ; Search directory for matching app name
+    mov rbx, APP_BUFFER_ADDR    ; rbx = current directory entry
+    mov rcx, 32                 ; max 32 entries per sector
+
+.labc_search_loop:
+    ; Check if entry is empty (first byte = 0)
+    cmp byte [rbx], 0
+    je .labc_not_found
+
+    ; Compare name (up to 12 chars)
+    push rcx
+    mov rsi, r13                ; App name we're looking for
+    mov rdi, rbx                ; Directory entry name
+    mov rcx, 12
+.labc_cmp_name:
+    mov al, [rsi]
+    mov ah, [rdi]
+    cmp al, 0                   ; End of search name?
+    je .labc_name_match_check
+    cmp al, ah
+    jne .labc_next_entry
+    inc rsi
+    inc rdi
+    dec rcx
+    jnz .labc_cmp_name
+    jmp .labc_name_match_check
+
+.labc_name_match_check:
+    ; If we got here, names match (or search name ended)
+    cmp ah, 0
+    je .labc_found
+    cmp ah, ' '                 ; Space padding also OK
+    je .labc_found
+
+.labc_next_entry:
+    pop rcx
+    add rbx, 16                 ; Next entry (16 bytes each)
+    dec rcx
+    jnz .labc_search_loop
+
+.labc_not_found:
+    ; App not found - just print error and continue
+    mov rsi, str_app_not_found
+    call serial_print
+    jmp .labc_done
+
+.labc_found:
+    pop rcx                     ; Clean up saved rcx
+
+    ; Get start sector and length from entry
+    movzx rax, word [rbx + 12]  ; Start sector
+    movzx rcx, word [rbx + 14]  ; Length in sectors
+
+    ; Load app sectors into buffer
+    mov rdi, APP_BUFFER_ADDR
+.labc_load_sectors:
+    push rcx
+    push rdi
+    push rax
+    call read_sector_to_addr
+    pop rax
+    pop rdi
+    pop rcx
+    inc rax                     ; Next sector
+    add rdi, 512                ; Advance buffer
+    dec rcx
+    jnz .labc_load_sectors
+
+    ; Null-terminate the loaded code
+    mov byte [rdi], 0
+
+    ; Interpret the loaded Forth source
+    mov rsi, APP_BUFFER_ADDR
+    call interpret_forth_buffer
+
+.labc_done:
+    pop r13
+    pop r12
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+serial_loading_hello: db 'Loading hello...', 13, 10, 0
 serial_loading_editor: db 'Loading editor...', 13, 10, 0
 serial_loading_invaders: db 'Loading invaders...', 13, 10, 0
+serial_loading_test: db 'Loading test...', 13, 10, 0
 serial_apps_done: db 'Apps loaded OK', 13, 10, 0
 debug_if_entry: db 'IF rbp=', 0
 debug_else_entry: db 'ELSE entry, IF placeholder=', 0
@@ -5631,60 +5826,8 @@ debug_lookup_word: db 'lookup: ', 0
 debug_lookup_result: db 'result: ', 0
 debug_imm_call: db 'IMM addr=', 0
 debug_else_done: db 'ELSE done', 13, 10, 0
-; =============================================================
-; Embedded Forth Apps
-; =============================================================
-
-; Simple embedded editor (no IF/THEN to avoid compilation issues)
-embedded_test:
-    ; Variables for editor
-    db '0 [editor-x] !', 10
-    db '0 [editor-y] !', 10
-    db '0 [editor-mode] !', 10
-    db ': white-on-black 7 ;', 10
-    db ': black-on-white 112 ;', 10
-    db ': draw-char white-on-black rot rot screen-char ;', 10
-    db ': clear-editor white-on-black screen-clear 0 [editor-x] ! 0 [editor-y] ! ;', 10
-    db ': move-cursor [editor-x] @ [editor-y] @ screen-set ;', 10
-    db ': status-line 69 black-on-white 0 24 screen-char 68 black-on-white 1 24 screen-char move-cursor ;', 10
-    db ': editor clear-editor status-line move-cursor ;', 10
-    db 0
-
-; Simple invaders stub - no if-then
-embedded_invaders:
-    db '40 [ship-x] !', 10
-    db '0 [score] !', 10
-    db ': game-color 10 ;', 10
-    db ': ship-color 14 ;', 10
-    db ': ship-char 65 ;', 10
-    db ': clear-game game-color screen-clear ;', 10
-    db ': draw-ship ship-char ship-color [ship-x] @ 23 screen-char ;', 10
-    db ': status-inv 73 112 0 24 screen-char 78 112 1 24 screen-char ;', 10
-    db ': invaders clear-game draw-ship status-inv ;', 10
-    db 0
-
-embedded_editor:
-    db '0 [editor-x] !', 10
-    db '0 [editor-y] !', 10
-    db '0 [editor-mode] !', 10
-    db ': white-on-black 7 ;', 10
-    db ': black-on-white 112 ;', 10
-    db ': draw-char white-on-black rot rot screen-char ;', 10
-    db ': clear-editor white-on-black screen-clear 0 [editor-x] ! 0 [editor-y] ! ;', 10
-    db ': move-cursor [editor-x] @ [editor-y] @ screen-set ;', 10
-    db ': status-line 32 black-on-white 0 24 screen-char [editor-mode] @ if 73 black-on-white 1 24 screen-char 78 black-on-white 2 24 screen-char 83 black-on-white 3 24 screen-char else 78 black-on-white 1 24 screen-char 79 black-on-white 2 24 screen-char 82 black-on-white 3 24 screen-char then 32 black-on-white 4 24 screen-char 32 black-on-white 5 24 screen-char 88 black-on-white 6 24 screen-char 58 black-on-white 7 24 screen-char [editor-x] @ 10 / 48 + black-on-white 8 24 screen-char [editor-x] @ 10 mod 48 + black-on-white 9 24 screen-char 32 black-on-white 10 24 screen-char 32 black-on-white 11 24 screen-char 89 black-on-white 12 24 screen-char 58 black-on-white 13 24 screen-char [editor-y] @ 10 / 48 + black-on-white 14 24 screen-char [editor-y] @ 10 mod 48 + black-on-white 15 24 screen-char move-cursor ;', 10
-    db ': editor-left [editor-x] @ 0 > if [editor-x] @ 1 - [editor-x] ! then status-line ;', 10
-    db ': editor-right [editor-x] @ 78 < if [editor-x] @ 1 + [editor-x] ! then status-line ;', 10
-    db ': editor-up [editor-y] @ 0 > if [editor-y] @ 1 - [editor-y] ! then status-line ;', 10
-    db ': editor-down [editor-y] @ 22 < if [editor-y] @ 1 + [editor-y] ! then status-line ;', 10
-    db ': editor-enter 0 [editor-x] ! [editor-y] @ 22 < if [editor-y] @ 1 + [editor-y] ! then status-line ;', 10
-    db ': insert-char [editor-x] @ [editor-y] @ draw-char editor-right ;', 10
-    db ': enter-insert 1 [editor-mode] ! status-line ;', 10
-    db ': exit-insert 0 [editor-mode] ! status-line ;', 10
-    db ': editor-loop begin key [editor-mode] @ if dup key-escape = if drop exit-insert else dup 13 = if drop editor-enter else dup 32 >= over 126 <= and if insert-char else drop then then then 1 else dup 113 = if drop 0 else dup 104 = if drop editor-left 1 else dup 106 = if drop editor-down 1 else dup 107 = if drop editor-up 1 else dup 108 = if drop editor-right 1 else dup 105 = if drop enter-insert 1 else dup key-left = if drop editor-left 1 else dup key-right = if drop editor-right 1 else dup key-up = if drop editor-up 1 else dup key-down = if drop editor-down 1 else drop 1 then then then then then then then then then then then 0 = until ;', 10
-    db ': editor clear-editor status-line move-cursor editor-loop 15 screen-clear 0 0 screen-set ;', 10
-    db 0
-
+debug_unknown_word: db 'Unknown: ', 0
+debug_semicolon: db 'Created word: ', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0

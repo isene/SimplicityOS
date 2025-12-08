@@ -1,5 +1,6 @@
-; Simplicity OS - Stage 2 Loader
-; Test: Enter 64-bit long mode without [BITS 64] code
+; Simplicity OS - Stage 2 Loader (Minimal)
+; Only handles: Real mode -> Protected mode -> Long mode
+; Jumps to kernel at 0x10000
 
 [BITS 16]
 [ORG 0x7E00]
@@ -102,8 +103,8 @@ prot_mode:
     ; Load 64-bit GDT
     lgdt [gdt64_descriptor]
 
-    ; Far jump to 64-bit code segment
-    jmp 0x08:long_mode_64
+    ; Far jump to 64-bit kernel at 0x10000
+    jmp 0x08:0x10000
 
     ; Should never get here
     hlt
@@ -166,6 +167,7 @@ gdt64_descriptor:
     dw gdt64_end - gdt64_start - 1
     dd gdt64_start
 
-msg: db 'Simplicity OS - Protected mode', 0
+msg: db 'Stage2: Transitioning to 64-bit...', 0
 
-%include "kernel/simplicity.asm"
+; Pad to known size (512 bytes minimum, but we need more for GDT)
+times 512-($-$$) db 0
