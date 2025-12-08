@@ -732,13 +732,20 @@ REPL:
     ; Use interpret_line - no code duplication!
     mov rsi, input_buffer
     call interpret_line
-    jmp .line_done
+    ; interpret_line returns success in RAX (1=ok, 0=error)
+    test rax, rax
+    jz .line_error
 
 .line_done:
     mov rax, str_ok
     call print_string_gray
     call newline
+    jmp .main_loop
 
+.line_error:
+    mov rax, str_unknown
+    call print_string_gray
+    call newline
     jmp .main_loop
 
 ; Create STRING object from C string (RSI = null-terminated string)
@@ -972,6 +979,27 @@ create_dict_entry:
     inc rcx
     jmp .count
 .name_done:
+    ; Debug: show name and length being stored
+    push rax
+    push rcx
+    push rdi
+    push rsi
+    mov rsi, debug_dict_name_msg
+    call serial_print
+    movzx rax, byte [rcx]
+    mov rax, rcx
+    call serial_print_hex
+    mov al, 61                  ; '='
+    call serial_putchar
+    mov rsi, new_word_name
+    call serial_print
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rax
+
     mov [rdi], cl
     inc rdi
 
@@ -4762,6 +4790,7 @@ word_semi:
     ; Debug: show what's in compile buffer
     push rax
     push rbx
+    push rcx
     push rsi
     mov rsi, debug_semi_buffer_msg
     call serial_print
@@ -4775,12 +4804,43 @@ word_semi:
     call serial_print
     mov al, 10
     call serial_putchar
+    ; Print first 4 qwords of compiled code
+    mov rsi, debug_semi_code_msg
+    call serial_print
+    mov rbx, compile_buffer
+    mov rcx, 4
+.debug_code_loop:
+    test rcx, rcx
+    jz .debug_code_done
+    mov rax, [rbx]
+    call serial_print_hex
+    mov al, 32
+    call serial_putchar
+    add rbx, 8
+    dec rcx
+    jmp .debug_code_loop
+.debug_code_done:
+    mov al, 10
+    call serial_putchar
     pop rsi
+    pop rcx
     pop rbx
     pop rax
 
     ; Create dictionary entry
     call create_dict_entry
+
+    ; Debug: show dict_latest after creation
+    push rax
+    push rsi
+    mov rsi, debug_dict_latest_msg
+    call serial_print
+    mov rax, [dict_latest]
+    call serial_print_hex
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    pop rax
     ret
 
 ; =============================================================
@@ -5012,8 +5072,11 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_unknown:
-    ; Unknown word - ignore silently
-    jmp .iline_parse_loop
+    ; Unknown word - set error flag and return
+    pop r13
+    pop rbx
+    xor rax, rax                ; Return 0 = error
+    ret
 
 .iline_skip_comment:
     ; Skip until )
@@ -5187,6 +5250,7 @@ interpret_line:
 .iline_done:
     pop r13
     pop rbx
+    mov rax, 1                  ; Return 1 = success
     ret
 
 ; exec_definition - Execute a colon definition
@@ -5497,6 +5561,10 @@ debug_compile_mode_msg: db '[compile_mode=', 0
 debug_boot_line_msg: db 'BOOT: ', 0
 debug_semi_buffer_msg: db '; compiled=', 0
 debug_semi_name_msg: db ' name=', 0
+debug_semi_code_msg: db '  code: ', 0
+debug_exec_word_msg: db 'EXEC: ', 0
+debug_dict_latest_msg: db '  dict_latest=', 0
+debug_dict_name_msg: db '  dict entry: len=', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
