@@ -4809,6 +4809,16 @@ interpret_forth_buffer:
     test rcx, rcx
     jz .check_more
 
+    ; Debug: print the line being processed
+    push rsi
+    mov rsi, debug_boot_line_msg
+    call serial_print
+    mov rsi, input_buffer
+    call serial_print
+    mov al, 10
+    call serial_putchar
+    pop rsi
+
     ; Process the line (reuse REPL's parse logic)
     mov rsi, input_buffer
     call interpret_line
@@ -5464,6 +5474,7 @@ debug_else_done: db 'ELSE done', 13, 10, 0
 debug_unknown_word: db 'Unknown: ', 0
 debug_semicolon: db 'Created word: ', 0
 debug_compile_mode_msg: db '[compile_mode=', 0
+debug_boot_line_msg: db 'BOOT: ', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
