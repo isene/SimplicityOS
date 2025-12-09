@@ -673,16 +673,6 @@ REPL:
     call load_apps
 
 .main_loop:
-    ; Debug: print compile_mode at start of loop
-    push rax
-    mov rsi, debug_compile_mode_msg
-    call serial_print
-    movzx rax, byte [compile_mode]
-    call serial_print_hex
-    mov al, 10
-    call serial_putchar
-    pop rax
-
     ; Print prompt
     mov rax, str_prompt
     call print_string
@@ -979,27 +969,6 @@ create_dict_entry:
     inc rcx
     jmp .count
 .name_done:
-    ; Debug: show name and length being stored
-    push rax
-    push rcx
-    push rdi
-    push rsi
-    mov rsi, debug_dict_name_msg
-    call serial_print
-    movzx rax, byte [rcx]
-    mov rax, rcx
-    call serial_print_hex
-    mov al, 61                  ; '='
-    call serial_putchar
-    mov rsi, new_word_name
-    call serial_print
-    mov al, 10
-    call serial_putchar
-    pop rsi
-    pop rdi
-    pop rcx
-    pop rax
-
     mov [rdi], cl
     inc rdi
 
@@ -4787,60 +4756,8 @@ word_semi:
     ; End compilation mode
     mov byte [compile_mode], 0
 
-    ; Debug: show what's in compile buffer
-    push rax
-    push rbx
-    push rcx
-    push rsi
-    mov rsi, debug_semi_buffer_msg
-    call serial_print
-    mov rax, [compile_ptr]
-    sub rax, compile_buffer
-    shr rax, 3                  ; Count of qwords
-    call serial_print_hex
-    mov rsi, debug_semi_name_msg
-    call serial_print
-    mov rsi, new_word_name
-    call serial_print
-    mov al, 10
-    call serial_putchar
-    ; Print first 4 qwords of compiled code
-    mov rsi, debug_semi_code_msg
-    call serial_print
-    mov rbx, compile_buffer
-    mov rcx, 4
-.debug_code_loop:
-    test rcx, rcx
-    jz .debug_code_done
-    mov rax, [rbx]
-    call serial_print_hex
-    mov al, 32
-    call serial_putchar
-    add rbx, 8
-    dec rcx
-    jmp .debug_code_loop
-.debug_code_done:
-    mov al, 10
-    call serial_putchar
-    pop rsi
-    pop rcx
-    pop rbx
-    pop rax
-
     ; Create dictionary entry
     call create_dict_entry
-
-    ; Debug: show dict_latest after creation
-    push rax
-    push rsi
-    mov rsi, debug_dict_latest_msg
-    call serial_print
-    mov rax, [dict_latest]
-    call serial_print_hex
-    mov al, 10
-    call serial_putchar
-    pop rsi
-    pop rax
     ret
 
 ; =============================================================
@@ -4889,17 +4806,7 @@ interpret_forth_buffer:
     test rcx, rcx
     jz .check_more
 
-    ; Debug: print the line being processed
-    push rsi
-    mov rsi, debug_boot_line_msg
-    call serial_print
-    mov rsi, input_buffer
-    call serial_print
-    mov al, 10
-    call serial_putchar
-    pop rsi
-
-    ; Process the line (reuse REPL's parse logic)
+    ; Process the line
     mov rsi, input_buffer
     call interpret_line
 
@@ -4993,22 +4900,6 @@ interpret_line:
     jne .iline_compile_word
 
     ; Check if dictionary word
-    push rax
-    push rsi
-    mov rsi, debug_check_docol_msg
-    call serial_print
-    mov rax, [rsp+8]
-    call serial_print_hex
-    mov rsi, debug_check_docol_val_msg
-    call serial_print
-    mov rax, [rsp+8]
-    mov rbx, [rax]
-    mov rax, rbx
-    call serial_print_hex
-    mov al, 10
-    call serial_putchar
-    pop rsi
-    pop rax
     push rax
     mov rbx, [rax]
     cmp rbx, DOCOL
