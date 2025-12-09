@@ -4774,18 +4774,8 @@ word_define:
     rep movsq
     mov [compile_ptr], rdi
 
-    ; Get name string (should be at [r15-16] based on stack layout)
-    ; After "name": R15=X, STRING at [X]
-    ; After {}: marker saved = X+8
-    ; After }: R15 = marker+8 = X+16
-    ; So STRING is at [X] = [R15-16]
+    ; Get name from [r15-16] (based on fixed array start)
     mov rax, [r15-16]
-
-    ; Serial debug: got name
-    push rsi
-    mov rsi, debug_define_got_name
-    call serial_print
-    pop rsi
 
     ; Copy name to new_word_name
     lea rsi, [rax+16]           ; String data
@@ -4800,15 +4790,7 @@ word_define:
     jnz .copy_name
 .name_copied:
 
-    ; Serial debug: name copied
-    push rsi
-    mov rsi, debug_define_name_copied
-    call serial_print
-    mov rsi, new_word_name
-    call serial_print
-    mov al, 10
-    call serial_putchar
-    pop rsi
+    ; Name extracted successfully
 
     ; Pop both array and name from stack
     sub r15, 16                 ; Remove two items
@@ -5034,8 +5016,6 @@ interpret_line:
     test rax, rax
     jz .iline_unknown
 
-    ; No debug here - too spammy during boot
-
     ; Check for immediate flag (bit 63 set by lookup_word)
     ; Immediate words are executed even during compilation
     bt rax, 63
@@ -5057,25 +5037,6 @@ interpret_line:
     push rax
     mov rbx, [rax]
 
-    ; Debug: only for dict words (addr >= dictionary_space)
-    cmp rax, dictionary_space
-    jl .skip_debug_docol
-    push rax
-    push rbx
-    mov al, '['
-    call emit_char
-    mov rax, [rsp+8]            ; Address from stack
-    call print_hex_screen
-    mov al, ':'
-    call emit_char
-    mov rax, [rsp]              ; DOCOL value
-    call print_hex_screen
-    mov al, ']'
-    call emit_char
-    pop rbx
-    pop rax
-.skip_debug_docol:
-
     cmp rbx, DOCOL
     pop rax
     je .iline_dict_word
@@ -5094,31 +5055,10 @@ interpret_line:
 
 .iline_dict_word:
     ; Execute dictionary word using the standard mechanism
-    push rsi
-    push rax
-    mov rsi, debug_exec_dict_word
-    call serial_print
-    pop rax
-    pop rsi
-
     push r13                    ; Save parse position
     add rax, 8                  ; Skip code pointer
     mov rsi, rax
-
-    push rsi
-    push rax
-    mov rsi, debug_exec_calling
-    call serial_print
-    pop rax
-    pop rsi
-
     call exec_definition
-
-    push rsi
-    mov rsi, debug_exec_returned
-    call serial_print
-    pop rsi
-
     pop r13
     jmp .iline_parse_loop
 
@@ -5316,7 +5256,11 @@ interpret_line:
 .iline_handle_array_start:
     ; { - Save marker on return stack and enter array mode
     inc r13                     ; Skip {
-    mov [rbp], r15
+    ; CRITICAL: Push R14 to memory before saving marker!
+    ; Otherwise items pushed before { are lost (they're only in R14)
+    mov [r15], r14
+    add r15, 8
+    mov [rbp], r15              ; Save marker AFTER pushing R14
     sub rbp, 8
     mov byte [array_mode], 1    ; Enable auto-tick mode
     jmp .iline_parse_loop
@@ -5741,6 +5685,8 @@ debug_exec_def_enter: db 'exec_definition: entered', 13, 10, 0
 debug_exec_def_rsi: db '  RSI=', 0
 debug_exec_def_lodsq: db '  lodsq from=', 0
 debug_exec_def_instr: db '  instr=', 0
+str_define_name_is: db '[NAME:', 0
+str_stack_dump: db '[STACK] ', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
