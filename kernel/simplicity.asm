@@ -1434,18 +1434,36 @@ lookup_word:
 
 .try_words:
     cmp rcx, 5
-    jne .try_forget
+    jne .try_define
     cmp byte [rdi], 'w'
-    jne .try_forget
+    jne .try_define
     cmp byte [rdi+1], 'o'
-    jne .try_forget
+    jne .try_define
     cmp byte [rdi+2], 'r'
-    jne .try_forget
+    jne .try_define
     cmp byte [rdi+3], 'd'
-    jne .try_forget
+    jne .try_define
     cmp byte [rdi+4], 's'
-    jne .try_forget
+    jne .try_define
     mov rax, word_words
+    jmp .done
+
+.try_define:
+    cmp rcx, 6
+    jne .try_forget
+    cmp byte [rdi], 'd'
+    jne .try_forget
+    cmp byte [rdi+1], 'e'
+    jne .try_forget
+    cmp byte [rdi+2], 'f'
+    jne .try_forget
+    cmp byte [rdi+3], 'i'
+    jne .try_forget
+    cmp byte [rdi+4], 'n'
+    jne .try_forget
+    cmp byte [rdi+5], 'e'
+    jne .try_forget
+    mov rax, word_define
     jmp .done
 
 .try_forget:
@@ -4696,6 +4714,76 @@ word_forget:
     pop rax
     ret
 
+word_define:
+    ; Pure RPN define: ( name-string body-array -- )
+    ; Stack has: second=name, TOS=array
+    push rax
+    push rbx
+    push rcx
+    push rdi
+    push rsi
+
+    ; Get array from TOS (R14)
+    mov rax, r14
+    ; Validate it's an array
+    cmp qword [rax], TYPE_ARRAY
+    jne .define_error
+
+    ; Get array count and data
+    mov rcx, [rax+8]            ; Element count
+    lea rsi, [rax+16]           ; Array data
+
+    ; Copy array elements to compile_buffer
+    mov rdi, compile_buffer
+    rep movsq
+    mov [compile_ptr], rdi
+
+    ; Pop array from stack
+    sub r15, 8
+    mov r14, [r15]
+
+    ; Get name string from new TOS
+    mov rax, r14
+    ; Validate it's a string
+    cmp qword [rax], TYPE_STRING
+    jne .define_error
+
+    ; Copy name to new_word_name
+    lea rsi, [rax+16]           ; String data
+    mov rdi, new_word_name
+    mov rcx, 32
+.copy_name:
+    lodsb
+    stosb
+    test al, al
+    jz .name_copied
+    dec rcx
+    jnz .copy_name
+.name_copied:
+
+    ; Pop name from stack
+    sub r15, 8
+    mov r14, [r15]
+
+    ; Create dictionary entry
+    call create_dict_entry
+
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+.define_error:
+    ; TODO: Better error handling
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
 word_see:
     ; Show word info - parse name and look it up
     call skip_spaces
@@ -4895,6 +4983,10 @@ interpret_line:
     jmp .iline_exec_immediate
 
 .iline_not_immediate:
+    ; Check if in array mode (auto-tick)
+    cmp byte [array_mode], 1
+    je .iline_push_ref
+
     ; Execute or compile word
     cmp byte [compile_mode], 0
     jne .iline_compile_word
@@ -4909,6 +5001,13 @@ interpret_line:
 .iline_exec_immediate:
     ; Execute immediate/built-in word
     call rax
+    jmp .iline_parse_loop
+
+.iline_push_ref:
+    ; Array mode - push reference instead of executing
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
     jmp .iline_parse_loop
 
 .iline_dict_word:
@@ -5112,15 +5211,17 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_handle_array_start:
-    ; { - Save marker on return stack
+    ; { - Save marker on return stack and enter array mode
     inc r13                     ; Skip {
     mov [rbp], r15
     sub rbp, 8
+    mov byte [array_mode], 1    ; Enable auto-tick mode
     jmp .iline_parse_loop
 
 .iline_handle_array_end:
-    ; } - Create array from marker
+    ; } - Create array from marker and exit array mode
     inc r13                     ; Skip }
+    mov byte [array_mode], 0    ; Disable auto-tick mode
     add rbp, 8
     mov rbx, [rbp]              ; Get marker
     ; Count elements
@@ -5491,7 +5592,7 @@ app_stack: times 64 dq 0        ; Separate stack for apps (64 cells)
 app_saved_tos: dq 0             ; Saved TOS (R14) when entering app
 app_saved_sp: dq 0              ; Saved stack pointer (R15) when entering app
 app_active: dq 0                ; 1 if inside app context, 0 otherwise
-
+array_mode: db 0                ; 1 if inside array literal, 0 otherwise
 compile_mode: db 0              ; 0 = interpret, 1 = compile
 dict_here: dq dictionary_space  ; Next free space in dictionary
 dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)
