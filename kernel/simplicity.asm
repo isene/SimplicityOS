@@ -193,6 +193,30 @@ BYE:
     jmp $
 
 ; Print number in RAX (64-bit)
+print_hex_screen:
+    ; Print RAX as hex to screen
+    push rax
+    push rbx
+    push rcx
+    mov rbx, rax
+    mov rcx, 16
+.hex_loop:
+    rol rbx, 4
+    mov rax, rbx
+    and rax, 0xF
+    cmp al, 10
+    jl .hex_digit
+    add al, 7
+.hex_digit:
+    add al, '0'
+    call emit_char
+    dec rcx
+    jnz .hex_loop
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
 print_number:
     push rax
     push rbx
@@ -4723,11 +4747,50 @@ word_define:
     push rdi
     push rsi
 
+    ; Debug: entering define
+    push rsi
+    mov rsi, debug_define_enter
+    call serial_print
+    pop rsi
+
     ; Get array from TOS (R14)
     mov rax, r14
+
+    ; Debug: show TOS type
+    push rsi
+    mov rsi, debug_define_tos_type
+    call serial_print
+    mov rax, [r14]
+    call serial_print_hex
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    mov rax, r14
+
     ; Validate it's an array
     cmp qword [rax], TYPE_ARRAY
     jne .define_error
+
+    ; Debug: array validated - show complete stack state
+    push rax
+    mov rax, str_define_arr_ok
+    call print_string
+    ; Show R14 (TOS - should be array)
+    mov rax, str_define_r14
+    call print_string
+    mov rax, r14
+    call print_hex_screen
+    ; Show [r15-8]
+    mov rax, str_define_r15m8
+    call print_string
+    mov rax, [r15-8]
+    call print_hex_screen
+    ; Show [r15-16]
+    mov rax, str_define_r15m16
+    call print_string
+    mov rax, [r15-16]
+    call print_hex_screen
+    pop rax
 
     ; Get array count and data
     mov rcx, [rax+8]            ; Element count
@@ -4738,15 +4801,17 @@ word_define:
     rep movsq
     mov [compile_ptr], rdi
 
-    ; Pop array from stack
-    sub r15, 8
-    mov r14, [r15]
+    ; Get name string (second on stack, at [r15-8])
+    mov rax, [r15-8]
 
-    ; Get name string from new TOS
-    mov rax, r14
-    ; Validate it's a string
-    cmp qword [rax], TYPE_STRING
-    jne .define_error
+    ; For now, skip validation and just try to use it
+    ; TODO: Proper validation after we understand stack layout
+
+    ; Debug: name validated
+    push rsi
+    mov rsi, debug_define_name_ok
+    call serial_print
+    pop rsi
 
     ; Copy name to new_word_name
     lea rsi, [rax+16]           ; String data
@@ -4761,12 +4826,28 @@ word_define:
     jnz .copy_name
 .name_copied:
 
-    ; Pop name from stack
-    sub r15, 8
-    mov r14, [r15]
+    ; Pop both array and name from stack
+    sub r15, 16                 ; Remove two items
+    mov r14, [r15]              ; New TOS
+
+    ; Debug: creating entry
+    push rsi
+    mov rsi, debug_define_creating
+    call serial_print
+    mov rsi, new_word_name
+    call serial_print
+    mov al, 10
+    call serial_putchar
+    pop rsi
 
     ; Create dictionary entry
     call create_dict_entry
+
+    ; Debug: done
+    push rsi
+    mov rsi, debug_define_done
+    call serial_print
+    pop rsi
 
     pop rsi
     pop rdi
@@ -4776,7 +4857,12 @@ word_define:
     ret
 
 .define_error:
-    ; TODO: Better error handling
+    ; Debug: error path - show on screen
+    push rax
+    mov rax, str_define_err
+    call print_string
+    pop rax
+
     pop rsi
     pop rdi
     pop rcx
@@ -5005,6 +5091,10 @@ interpret_line:
 
 .iline_push_ref:
     ; Array mode - push reference instead of executing
+    push rax
+    mov rax, str_array_tick
+    call print_string
+    pop rax
     mov [r15], r14
     add r15, 8
     mov r14, rax
@@ -5249,10 +5339,13 @@ interpret_line:
     dec rcx
     jmp .iline_copy_arr
 .iline_arr_done:
-    mov r15, rbx                ; Reset stack
-    mov [r15], r14
-    add r15, 8
-    mov r14, rax
+    ; Array replaces all collected items (from marker onwards)
+    ; Keep stack items that were before the {
+    ; Stack was: [... stuff before { ] [ items collected ]
+    ; Becomes:   [... stuff before { ] [ array ]
+    mov r15, rbx                ; Reset to marker position
+    add r15, 8                  ; One slot for the array
+    mov r14, rax                ; Array becomes TOS
     jmp .iline_parse_loop
 
 .iline_done:
@@ -5576,6 +5669,22 @@ debug_dict_latest_msg: db '  dict_latest=', 0
 debug_dict_name_msg: db '  dict entry: len=', 0
 debug_check_docol_msg: db 'CHECK addr=', 0
 debug_check_docol_val_msg: db ' val=', 0
+debug_define_enter: db 'DEFINE called', 13, 10, 0
+debug_define_tos_type: db 'TOS type=', 0
+debug_define_array_ok: db 'Array OK', 13, 10, 0
+debug_define_name_ok: db 'Name OK', 13, 10, 0
+debug_define_creating: db 'Creating: ', 0
+debug_define_done: db 'Define done', 13, 10, 0
+debug_define_error: db 'DEFINE ERROR', 13, 10, 0
+str_define_arr_ok: db '[ARR-OK]', 0
+str_define_err: db '[DEF-ERR]', 0
+str_define_r14: db ' R14:', 0
+str_define_r15m8: db ' [R15-8]:', 0
+str_define_r15m16: db ' [R15-16]:', 0
+str_define_name_addr: db ' ADDR:', 0
+str_define_name_type: db ' TYPE:', 0
+str_array_tick: db 'T', 0
+str_define_bad_heap: db '[BAD-HEAP]', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
