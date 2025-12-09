@@ -4769,6 +4769,20 @@ word_define:
     mov rcx, [rax+8]            ; Element count
     lea rsi, [rax+16]           ; Array data
 
+    ; Debug: show element count
+    push rax
+    push rcx
+    mov al, '['
+    call emit_char
+    pop rcx
+    push rcx
+    mov rax, rcx
+    call print_number           ; Print count as decimal
+    mov al, ']'
+    call emit_char
+    pop rcx
+    pop rax
+
     ; Copy array elements to compile_buffer
     mov rdi, compile_buffer
     rep movsq
