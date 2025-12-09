@@ -4747,50 +4747,23 @@ word_define:
     push rdi
     push rsi
 
-    ; Debug: entering define
+    ; Serial debug
     push rsi
-    mov rsi, debug_define_enter
+    mov rsi, debug_define_start
     call serial_print
     pop rsi
 
     ; Get array from TOS (R14)
     mov rax, r14
-
-    ; Debug: show TOS type
-    push rsi
-    mov rsi, debug_define_tos_type
-    call serial_print
-    mov rax, [r14]
-    call serial_print_hex
-    mov al, 10
-    call serial_putchar
-    pop rsi
-    mov rax, r14
-
     ; Validate it's an array
     cmp qword [rax], TYPE_ARRAY
     jne .define_error
 
-    ; Debug: array validated - show complete stack state
-    push rax
-    mov rax, str_define_arr_ok
-    call print_string
-    ; Show R14 (TOS - should be array)
-    mov rax, str_define_r14
-    call print_string
-    mov rax, r14
-    call print_hex_screen
-    ; Show [r15-8]
-    mov rax, str_define_r15m8
-    call print_string
-    mov rax, [r15-8]
-    call print_hex_screen
-    ; Show [r15-16]
-    mov rax, str_define_r15m16
-    call print_string
-    mov rax, [r15-16]
-    call print_hex_screen
-    pop rax
+    ; Serial debug
+    push rsi
+    mov rsi, debug_define_arr_valid
+    call serial_print
+    pop rsi
 
     ; Get array count and data
     mov rcx, [rax+8]            ; Element count
@@ -4804,12 +4777,9 @@ word_define:
     ; Get name string (second on stack, at [r15-8])
     mov rax, [r15-8]
 
-    ; For now, skip validation and just try to use it
-    ; TODO: Proper validation after we understand stack layout
-
-    ; Debug: name validated
+    ; Serial debug: got name
     push rsi
-    mov rsi, debug_define_name_ok
+    mov rsi, debug_define_got_name
     call serial_print
     pop rsi
 
@@ -4826,13 +4796,9 @@ word_define:
     jnz .copy_name
 .name_copied:
 
-    ; Pop both array and name from stack
-    sub r15, 16                 ; Remove two items
-    mov r14, [r15]              ; New TOS
-
-    ; Debug: creating entry
+    ; Serial debug: name copied
     push rsi
-    mov rsi, debug_define_creating
+    mov rsi, debug_define_name_copied
     call serial_print
     mov rsi, new_word_name
     call serial_print
@@ -4840,12 +4806,22 @@ word_define:
     call serial_putchar
     pop rsi
 
+    ; Pop both array and name from stack
+    sub r15, 16                 ; Remove two items
+    mov r14, [r15]              ; New TOS
+
+    ; Serial debug: calling create_dict_entry
+    push rsi
+    mov rsi, debug_define_creating_entry
+    call serial_print
+    pop rsi
+
     ; Create dictionary entry
     call create_dict_entry
 
-    ; Debug: done
+    ; Serial debug: entry created
     push rsi
-    mov rsi, debug_define_done
+    mov rsi, debug_define_entry_created
     call serial_print
     pop rsi
 
@@ -4857,12 +4833,6 @@ word_define:
     ret
 
 .define_error:
-    ; Debug: error path - show on screen
-    push rax
-    mov rax, str_define_err
-    call print_string
-    pop rax
-
     pop rsi
     pop rdi
     pop rcx
@@ -5091,10 +5061,6 @@ interpret_line:
 
 .iline_push_ref:
     ; Array mode - push reference instead of executing
-    push rax
-    mov rax, str_array_tick
-    call print_string
-    pop rax
     mov [r15], r14
     add r15, 8
     mov r14, rax
@@ -5102,10 +5068,31 @@ interpret_line:
 
 .iline_dict_word:
     ; Execute dictionary word using the standard mechanism
+    push rsi
+    push rax
+    mov rsi, debug_exec_dict_word
+    call serial_print
+    pop rax
+    pop rsi
+
     push r13                    ; Save parse position
     add rax, 8                  ; Skip code pointer
     mov rsi, rax
+
+    push rsi
+    push rax
+    mov rsi, debug_exec_calling
+    call serial_print
+    pop rax
+    pop rsi
+
     call exec_definition
+
+    push rsi
+    mov rsi, debug_exec_returned
+    call serial_print
+    pop rsi
+
     pop r13
     jmp .iline_parse_loop
 
@@ -5359,8 +5346,27 @@ interpret_line:
 ; Input: RSI = pointer to definition body (after DOCOL)
 exec_definition:
     push r13
+
+    push rsi
+    mov rsi, debug_exec_def_enter
+    call serial_print
+    pop rsi
+
 .exec_def_loop:
     lodsq
+
+    ; Debug each instruction
+    push rax
+    push rsi
+    mov rsi, debug_exec_def_instr
+    call serial_print
+    mov rax, [rsp+8]
+    call serial_print_hex
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    pop rax
+
     cmp rax, EXIT
     je .exec_def_done
 
@@ -5676,15 +5682,17 @@ debug_define_name_ok: db 'Name OK', 13, 10, 0
 debug_define_creating: db 'Creating: ', 0
 debug_define_done: db 'Define done', 13, 10, 0
 debug_define_error: db 'DEFINE ERROR', 13, 10, 0
-str_define_arr_ok: db '[ARR-OK]', 0
-str_define_err: db '[DEF-ERR]', 0
-str_define_r14: db ' R14:', 0
-str_define_r15m8: db ' [R15-8]:', 0
-str_define_r15m16: db ' [R15-16]:', 0
-str_define_name_addr: db ' ADDR:', 0
-str_define_name_type: db ' TYPE:', 0
-str_array_tick: db 'T', 0
-str_define_bad_heap: db '[BAD-HEAP]', 0
+debug_define_start: db 'DEFINE: start', 13, 10, 0
+debug_define_arr_valid: db 'DEFINE: array valid', 13, 10, 0
+debug_define_got_name: db 'DEFINE: got name addr', 13, 10, 0
+debug_define_name_copied: db 'DEFINE: name copied: ', 0
+debug_define_creating_entry: db 'DEFINE: creating entry', 13, 10, 0
+debug_define_entry_created: db 'DEFINE: entry created!', 13, 10, 0
+debug_exec_dict_word: db 'EXEC: dict word found', 13, 10, 0
+debug_exec_calling: db 'EXEC: calling exec_definition', 13, 10, 0
+debug_exec_returned: db 'EXEC: returned from exec_definition', 13, 10, 0
+debug_exec_def_enter: db 'exec_definition: entered', 13, 10, 0
+debug_exec_def_instr: db 'exec_definition: instr=', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
