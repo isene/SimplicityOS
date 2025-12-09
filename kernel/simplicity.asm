@@ -4774,8 +4774,12 @@ word_define:
     rep movsq
     mov [compile_ptr], rdi
 
-    ; Get name string (second on stack, at [r15-8])
-    mov rax, [r15-8]
+    ; Get name string (should be at [r15-16] based on stack layout)
+    ; After "name": R15=X, STRING at [X]
+    ; After {}: marker saved = X+8
+    ; After }: R15 = marker+8 = X+16
+    ; So STRING is at [X] = [R15-16]
+    mov rax, [r15-16]
 
     ; Serial debug: got name
     push rsi
@@ -5030,6 +5034,8 @@ interpret_line:
     test rax, rax
     jz .iline_unknown
 
+    ; No debug here - too spammy during boot
+
     ; Check for immediate flag (bit 63 set by lookup_word)
     ; Immediate words are executed even during compilation
     bt rax, 63
@@ -5050,6 +5056,26 @@ interpret_line:
     ; Check if dictionary word
     push rax
     mov rbx, [rax]
+
+    ; Debug: only for dict words (addr >= dictionary_space)
+    cmp rax, dictionary_space
+    jl .skip_debug_docol
+    push rax
+    push rbx
+    mov al, '['
+    call emit_char
+    mov rax, [rsp+8]            ; Address from stack
+    call print_hex_screen
+    mov al, ':'
+    call emit_char
+    mov rax, [rsp]              ; DOCOL value
+    call print_hex_screen
+    mov al, ']'
+    call emit_char
+    pop rbx
+    pop rax
+.skip_debug_docol:
+
     cmp rbx, DOCOL
     pop rax
     je .iline_dict_word
@@ -5347,12 +5373,32 @@ interpret_line:
 exec_definition:
     push r13
 
+    push rax
     push rsi
     mov rsi, debug_exec_def_enter
     call serial_print
+    mov rsi, debug_exec_def_rsi
+    call serial_print
+    mov rax, [rsp]              ; RSI value
+    call serial_print_hex
+    mov al, 10
+    call serial_putchar
     pop rsi
+    pop rax
 
 .exec_def_loop:
+    ; Debug: about to lodsq
+    push rax
+    push rsi
+    mov rsi, debug_exec_def_lodsq
+    call serial_print
+    mov rax, [rsp]
+    call serial_print_hex
+    mov al, 10
+    call serial_putchar
+    pop rsi
+    pop rax
+
     lodsq
 
     ; Debug each instruction
@@ -5692,7 +5738,9 @@ debug_exec_dict_word: db 'EXEC: dict word found', 13, 10, 0
 debug_exec_calling: db 'EXEC: calling exec_definition', 13, 10, 0
 debug_exec_returned: db 'EXEC: returned from exec_definition', 13, 10, 0
 debug_exec_def_enter: db 'exec_definition: entered', 13, 10, 0
-debug_exec_def_instr: db 'exec_definition: instr=', 0
+debug_exec_def_rsi: db '  RSI=', 0
+debug_exec_def_lodsq: db '  lodsq from=', 0
+debug_exec_def_instr: db '  instr=', 0
 str_banner: db 'Simplicity Forth REPL v0.3', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
