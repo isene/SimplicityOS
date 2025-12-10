@@ -696,45 +696,172 @@ REPL:
     mov rax, str_prompt
     call print_string
 
-    ; Read line into buffer
+    ; Read line into buffer with editing support
     mov rdi, input_buffer
-    xor rcx, rcx            ; Character count
+    xor rcx, rcx                    ; Character count
+    mov qword [cursor_pos], 0       ; Cursor at start
 
 .read_char:
-    call wait_key           ; Get character in RAX
+    call wait_key                   ; Get character in RAX
 
-    cmp al, 10              ; Enter?
+    cmp al, 10                      ; Enter?
     je .execute_line
 
-    cmp al, 8               ; Backspace?
-    je .backspace
+    cmp al, 8                       ; Backspace?
+    je .handle_backspace
 
-    ; Regular character - echo and store
-    call emit_char
-    mov [rdi], al
-    inc rdi
-    inc rcx
-    cmp rcx, 79             ; Max line length
-    jl .read_char
-    jmp .execute_line
+    cmp al, 127                     ; Delete?
+    je .handle_delete
 
-.backspace:
-    test rcx, rcx
-    jz .read_char           ; Nothing to delete
+    cmp al, 27                      ; Escape (arrow keys)?
+    je .handle_escape
+
+    cmp al, 32                      ; Printable?
+    jl .read_char                   ; Ignore control chars
+
+    ; Regular character - insert at cursor
+    cmp rcx, 79                     ; Max line length?
+    jge .read_char
+
+    ; If cursor not at end, shift characters right
+    mov r8, rcx
+    cmp r8, [cursor_pos]
+    je .insert_at_end
+
+    ; Shift characters right from cursor position
+    mov rsi, input_buffer
+    add rsi, rcx                    ; End of string
+    mov rdi, rsi
+    inc rdi                         ; One position right
+    mov r9, rcx
+    sub r9, [cursor_pos]            ; Chars to shift
+.shift_right:
+    test r9, r9
+    jz .shift_done
+    mov bl, [rsi]
+    mov [rdi], bl
+    dec rsi
     dec rdi
+    dec r9
+    jmp .shift_right
+.shift_done:
+
+.insert_at_end:
+    ; Store character at cursor position
+    mov rsi, input_buffer
+    add rsi, [cursor_pos]
+    mov [rsi], al
+    inc rcx                         ; Increase length
+    inc qword [cursor_pos]          ; Move cursor right
+
+    ; Redraw line from cursor onwards
+    call redraw_line
+    jmp .read_char
+
+.handle_backspace:
+    mov rax, [cursor_pos]
+    test rax, rax
+    jz .read_char                   ; At start, can't backspace
+
+    ; Shift characters left
+    mov rsi, input_buffer
+    add rsi, [cursor_pos]
+    mov rdi, rsi
+    dec rdi
+    mov r9, rcx
+    sub r9, [cursor_pos]
+.shift_left:
+    test r9, r9
+    jz .backspace_done
+    mov bl, [rsi]
+    mov [rdi], bl
+    inc rsi
+    inc rdi
+    dec r9
+    jmp .shift_left
+.backspace_done:
+    dec qword [cursor_pos]
     dec rcx
-    ; Move cursor back, print space, move back again
-    mov rbx, [cursor]
-    sub rbx, 2              ; Move back one char
-    mov byte [rbx], ' '     ; Erase with space
-    mov byte [rbx+1], 0x0F
-    mov [cursor], rbx       ; Update cursor
-    call update_hw_cursor
+    call redraw_line
+    jmp .read_char
+
+.handle_delete:
+    mov rax, [cursor_pos]
+    cmp rax, rcx
+    jge .read_char                  ; At end, nothing to delete
+    ; Similar to backspace but don't move cursor back
+    mov rsi, input_buffer
+    add rsi, [cursor_pos]
+    inc rsi
+    mov rdi, rsi
+    dec rdi
+    mov r9, rcx
+    sub r9, [cursor_pos]
+    dec r9
+.shift_del:
+    test r9, r9
+    jz .delete_done
+    mov bl, [rsi]
+    mov [rdi], bl
+    inc rsi
+    inc rdi
+    dec r9
+    jmp .shift_del
+.delete_done:
+    dec rcx
+    call redraw_line
+    jmp .read_char
+
+.handle_escape:
+    ; Read next character
+    call wait_key
+    cmp al, 91                      ; '[' ?
+    jne .read_char                  ; Not an arrow, ignore
+
+    ; Read arrow key code
+    call wait_key
+    cmp al, 67                      ; 'C' = Right arrow
+    je .arrow_right
+    cmp al, 68                      ; 'D' = Left arrow
+    je .arrow_left
+    cmp al, 65                      ; 'A' = Up arrow
+    je .arrow_up
+    cmp al, 66                      ; 'B' = Down arrow
+    je .arrow_down
+    jmp .read_char                  ; Unknown, ignore
+
+.arrow_left:
+    mov rax, [cursor_pos]
+    test rax, rax
+    jz .read_char
+    dec qword [cursor_pos]
+    call update_cursor_display
+    jmp .read_char
+
+.arrow_right:
+    mov rax, [cursor_pos]
+    cmp rax, rcx
+    jge .read_char
+    inc qword [cursor_pos]
+    call update_cursor_display
+    jmp .read_char
+
+.arrow_up:
+    call history_prev
+    jmp .read_char
+
+.arrow_down:
+    call history_next
     jmp .read_char
 
 .execute_line:
+    ; Save to history before executing
+    call save_to_history
+
     ; Null-terminate input
-    mov byte [rdi], 0
+    mov rsi, input_buffer
+    add rsi, rcx
+    mov byte [rsi], 0
 
     call newline
 
@@ -756,6 +883,63 @@ REPL:
     call print_string_gray
     call newline
     jmp .main_loop
+
+; Helper functions for line editing
+redraw_line:
+    push rax
+    push rbx
+    push rcx
+    push rsi
+    ; Clear from cursor to end of line
+    mov rbx, [cursor]
+    mov rax, rcx
+    sub rax, [cursor_pos]
+    inc rax
+.clear_loop:
+    test rax, rax
+    jz .clear_done
+    mov byte [rbx], ' '
+    mov byte [rbx+1], 0x0E
+    add rbx, 2
+    dec rax
+    jmp .clear_loop
+.clear_done:
+    ; Reset cursor to prompt + cursor_pos
+    ; Calculate cursor position from start of line
+    ; For now, simple: just update cursor
+    pop rsi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+update_cursor_display:
+    ; Move VGA cursor to match cursor_pos
+    ; For now, simple implementation
+    ret
+
+save_to_history:
+    push rax
+    push rbx
+    push rcx
+    push rsi
+    push rdi
+    ; TODO: Implement circular history buffer
+    ; For now, just stub
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+history_prev:
+    ; TODO: Load previous history entry
+    ret
+
+history_next:
+    ; TODO: Load next history entry
+    ret
 
 ; Create STRING object from C string (RSI = null-terminated string)
 ; Returns object address in RAX
@@ -5630,6 +5814,10 @@ str_goodbye: db 'Goodbye!', 0
 str_unknown: db ' ?', 0
 
 input_buffer: times 80 db 0
+history_buffer: times 10*80 db 0    ; 10 lines of history
+history_count: dq 0                  ; Number of lines in history
+history_index: dq 0                  ; Current position in history
+cursor_pos: dq 0                     ; Cursor position in current line
 shift_state: db 0
 ctrl_state: db 0
 forth_stack: times 64 dq 0      ; Forth data stack (64 cells)
