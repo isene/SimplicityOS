@@ -754,8 +754,8 @@ REPL:
     inc rcx                         ; Increase length
     inc qword [cursor_pos]          ; Move cursor right
 
-    ; Redraw line from cursor onwards
-    call redraw_line
+    ; Echo character (simple for now)
+    call emit_char
     jmp .read_char
 
 .handle_backspace:
@@ -782,7 +782,13 @@ REPL:
 .backspace_done:
     dec qword [cursor_pos]
     dec rcx
-    call redraw_line
+    ; Visual feedback: move cursor back, print space, move back
+    mov rbx, [cursor]
+    sub rbx, 2
+    mov byte [rbx], ' '
+    mov byte [rbx+1], 0x0E
+    mov [cursor], rbx
+    call update_hw_cursor
     jmp .read_char
 
 .handle_delete:
@@ -848,10 +854,21 @@ REPL:
 
 .arrow_up:
     call history_prev
+    ; Load new line length
+    mov rcx, [line_length]
+    ; Redraw line to show history entry
+    ; For now, simple: clear line and reprint
+    call clear_current_line
+    call reprint_line
     jmp .read_char
 
 .arrow_down:
     call history_next
+    ; Load new line length
+    mov rcx, [line_length]
+    ; Redraw
+    call clear_current_line
+    call reprint_line
     jmp .read_char
 
 .execute_line:
@@ -885,47 +902,139 @@ REPL:
     jmp .main_loop
 
 ; Helper functions for line editing
-redraw_line:
+clear_current_line:
+    ; Clear the current input line on screen
     push rax
     push rbx
     push rcx
-    push rsi
-    ; Clear from cursor to end of line
+
+    ; Go to start of line (after prompt)
     mov rbx, [cursor]
-    mov rax, rcx
-    sub rax, [cursor_pos]
-    inc rax
-.clear_loop:
-    test rax, rax
-    jz .clear_done
-    mov byte [rbx], ' '
-    mov byte [rbx+1], 0x0E
+    ; Calculate how far back to go (cursor_pos * 2 for VGA)
+    mov rax, [cursor_pos]
+    shl rax, 1
+    sub rbx, rax
+
+    ; Clear 77 chars (leave room for prompt)
+    mov rcx, 77
+    mov ax, 0x0E20              ; Space
+.clear:
+    mov [rbx], ax
     add rbx, 2
-    dec rax
-    jmp .clear_loop
-.clear_done:
-    ; Reset cursor to prompt + cursor_pos
-    ; Calculate cursor position from start of line
-    ; For now, simple: just update cursor
-    pop rsi
+    dec rcx
+    jnz .clear
+
+    ; Reset cursor to after prompt
+    mov rbx, [cursor]
+    mov rax, [cursor_pos]
+    shl rax, 1
+    sub rbx, rax
+    mov [cursor], rbx
+
     pop rcx
     pop rbx
     pop rax
     ret
 
+reprint_line:
+    ; Reprint input_buffer content
+    push rax
+    push rcx
+    push rsi
+
+    mov rsi, input_buffer
+    mov rcx, [line_length]
+.print:
+    test rcx, rcx
+    jz .done
+    lodsb
+    call emit_char
+    dec rcx
+    jmp .print
+.done:
+
+    pop rsi
+    pop rcx
+    pop rax
+    ret
+
+redraw_line:
+    ; Full redraw (used by editing operations)
+    ; For now, just ensure characters appear
+    ret
+
 update_cursor_display:
-    ; Move VGA cursor to match cursor_pos
-    ; For now, simple implementation
+    ; Move VGA cursor left or right without redrawing
+    ; Cursor should be at: prompt_start + cursor_pos
+    push rax
+    push rbx
+
+    ; Get current cursor position in characters
+    mov rax, [cursor]
+    sub rax, 0xB8000
+    shr rax, 1                      ; Convert to character position
+
+    ; Calculate desired position: row_start + 2 (prompt) + cursor_pos
+    mov rbx, rax
+    ; Get row
+    xor rdx, rdx
+    mov rcx, 80
+    div rcx                         ; RAX = row, RDX = column
+
+    ; New column = 2 (prompt "> ") + cursor_pos
+    mov rdx, 2
+    add rdx, [cursor_pos]
+
+    ; Calculate new position: row * 80 + column
+    mov rcx, 80
+    mul rcx
+    add rax, rdx
+
+    ; Convert back to VGA address
+    shl rax, 1
+    add rax, 0xB8000
+    mov [cursor], rax
+    call update_hw_cursor
+
+    pop rbx
+    pop rax
     ret
 
 save_to_history:
+    ; Save current line to history buffer (circular, 10 entries)
     push rax
     push rbx
     push rcx
     push rsi
     push rdi
-    ; TODO: Implement circular history buffer
-    ; For now, just stub
+
+    ; Don't save empty lines
+    test rcx, rcx
+    jz .save_done
+
+    ; Calculate offset in history buffer (count % 10) * 80
+    mov rax, [history_count]
+    xor rdx, rdx
+    mov rbx, 10
+    div rbx                         ; RDX = count % 10
+    mov rax, rdx
+    mov rbx, 80
+    mul rbx                         ; RAX = offset in bytes
+    mov rdi, history_buffer
+    add rdi, rax
+
+    ; Copy from input_buffer to history
+    mov rsi, input_buffer
+    mov rcx, 80
+    rep movsb
+
+    ; Increment history count
+    inc qword [history_count]
+    ; Reset history index to end
+    mov rax, [history_count]
+    mov [history_index], rax
+
+.save_done:
     pop rdi
     pop rsi
     pop rcx
@@ -934,11 +1043,124 @@ save_to_history:
     ret
 
 history_prev:
-    ; TODO: Load previous history entry
+    ; Load previous history entry (up arrow)
+    push rax
+    push rbx
+    push rcx
+    push rsi
+    push rdi
+
+    ; Check if we have history
+    mov rax, [history_count]
+    test rax, rax
+    jz .prev_done
+
+    ; Check if we can go back
+    mov rax, [history_index]
+    test rax, rax
+    jz .prev_done                   ; Already at oldest
+
+    ; Move to previous entry
+    dec qword [history_index]
+
+    ; Load that entry
+    call load_history_entry
+
+.prev_done:
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rbx
+    pop rax
     ret
 
 history_next:
-    ; TODO: Load next history entry
+    ; Load next history entry (down arrow)
+    push rax
+    push rbx
+    push rcx
+    push rsi
+    push rdi
+
+    ; Check if we can go forward
+    mov rax, [history_index]
+    cmp rax, [history_count]
+    jge .next_done                  ; At newest
+
+    ; Move to next entry
+    inc qword [history_index]
+
+    ; If at end, clear line
+    mov rax, [history_index]
+    cmp rax, [history_count]
+    je .clear_line
+
+    ; Load that entry
+    call load_history_entry
+    jmp .next_done
+
+.clear_line:
+    ; Clear input buffer
+    mov rdi, input_buffer
+    mov rcx, 80
+    xor rax, rax
+    rep stosb
+    ; Reset cursor_pos and length
+    mov qword [cursor_pos], 0
+    mov qword [line_length], 0
+
+.next_done:
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+load_history_entry:
+    ; Load history entry at history_index into input_buffer
+    ; Modifies: input_buffer, cursor_pos, RCX in caller
+    push rax
+    push rbx
+    push rsi
+    push rdi
+
+    ; Calculate offset: (index % 10) * 80
+    mov rax, [history_index]
+    xor rdx, rdx
+    mov rbx, 10
+    div rbx
+    mov rax, rdx
+    mov rbx, 80
+    mul rbx
+
+    ; Copy from history to input_buffer
+    mov rsi, history_buffer
+    add rsi, rax
+    mov rdi, input_buffer
+    mov rcx, 80
+    rep movsb
+
+    ; Calculate actual length
+    mov rsi, input_buffer
+    xor rcx, rcx
+.find_len:
+    cmp byte [rsi], 0
+    je .len_found
+    inc rsi
+    inc rcx
+    cmp rcx, 80
+    jl .find_len
+.len_found:
+    ; Update cursor to end
+    mov [cursor_pos], rcx
+    ; Store length for caller to retrieve
+    mov [line_length], rcx
+
+    pop rdi
+    pop rsi
+    pop rbx
+    pop rax
     ret
 
 ; Create STRING object from C string (RSI = null-terminated string)
@@ -5818,6 +6040,7 @@ history_buffer: times 10*80 db 0    ; 10 lines of history
 history_count: dq 0                  ; Number of lines in history
 history_index: dq 0                  ; Current position in history
 cursor_pos: dq 0                     ; Cursor position in current line
+line_length: dq 0                    ; Current line length (for history)
 shift_state: db 0
 ctrl_state: db 0
 forth_stack: times 64 dq 0      ; Forth data stack (64 cells)
