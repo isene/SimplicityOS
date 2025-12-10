@@ -1010,6 +1010,19 @@ create_dict_entry:
 .aligned:
 
     ; Store code pointer (DOCOL)
+    push rax
+    mov al, '<'
+    call emit_char
+    mov al, 'D'
+    call emit_char
+    mov al, 'O'
+    call emit_char
+    mov al, 'C'
+    call emit_char
+    mov al, '>'
+    call emit_char
+    pop rax
+
     mov qword [rdi], DOCOL
     add rdi, 8
 
@@ -4769,16 +4782,17 @@ word_define:
     mov rcx, [rax+8]            ; Element count
     lea rsi, [rax+16]           ; Array data
 
-    ; Debug: show element count
+    ; Debug: show count
     push rax
     push rcx
-    mov al, '['
+    mov al, 'N'
+    call emit_char
+    mov al, '='
     call emit_char
     pop rcx
     push rcx
     mov rax, rcx
-    call print_number           ; Print count as decimal
-    mov al, ']'
+    add al, '0'
     call emit_char
     pop rcx
     pop rax
@@ -4788,8 +4802,12 @@ word_define:
     rep movsq
     mov [compile_ptr], rdi
 
-    ; Get name from [r15-16] (based on fixed array start)
-    mov rax, [r15-16]
+    ; Get name from [r15-8] (second on stack, array is TOS in R14)
+    mov rax, [r15-8]
+
+    ; Validate it's a STRING
+    cmp qword [rax], TYPE_STRING
+    jne .define_error
 
     ; Copy name to new_word_name
     lea rsi, [rax+16]           ; String data
@@ -4810,11 +4828,24 @@ word_define:
     sub r15, 16                 ; Remove two items
     mov r14, [r15]              ; New TOS
 
-    ; Serial debug: calling create_dict_entry
-    push rsi
-    mov rsi, debug_define_creating_entry
-    call serial_print
-    pop rsi
+    ; Ensure modes are reset (match word_semi behavior)
+    mov byte [compile_mode], 0
+    mov byte [array_mode], 0
+
+    ; Debug: show compile_ptr value before create_dict_entry
+    push rax
+    push rbx
+    mov al, 'P'
+    call emit_char
+    mov al, '='
+    call emit_char
+    mov rax, [compile_ptr]
+    sub rax, compile_buffer
+    shr rax, 3
+    add al, '0'
+    call emit_char
+    pop rbx
+    pop rax
 
     ; Create dictionary entry
     call create_dict_entry
@@ -5051,6 +5082,21 @@ interpret_line:
     push rax
     mov rbx, [rax]
 
+    ; Debug: show if it's a dict word
+    cmp rbx, DOCOL
+    je .is_dict_debug
+    push rax
+    mov al, 'B'
+    call emit_char
+    pop rax
+    jmp .not_dict_debug
+.is_dict_debug:
+    push rax
+    mov al, 'D'
+    call emit_char
+    pop rax
+.not_dict_debug:
+
     cmp rbx, DOCOL
     pop rax
     je .iline_dict_word
@@ -5061,18 +5107,38 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_push_ref:
-    ; Array mode - push reference instead of executing
-    mov [r15], r14
-    add r15, 8
-    mov r14, rax
+    ; Array mode - store to collection buffer, not Forth stack
+    push rbx
+    mov rbx, [array_collect_ptr]
+    mov [rbx], rax              ; Store reference
+    add rbx, 8
+    mov [array_collect_ptr], rbx
+    pop rbx
     jmp .iline_parse_loop
 
 .iline_dict_word:
     ; Execute dictionary word using the standard mechanism
+    push rax
+    mov al, 'D'
+    call emit_char
+    pop rax
+
     push r13                    ; Save parse position
     add rax, 8                  ; Skip code pointer
     mov rsi, rax
+
+    push rax
+    mov al, 'C'
+    call emit_char
+    pop rax
+
     call exec_definition
+
+    push rax
+    mov al, 'R'
+    call emit_char
+    pop rax
+
     pop r13
     jmp .iline_parse_loop
 
@@ -5268,55 +5334,51 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_handle_array_start:
-    ; { - Save marker on return stack and enter array mode
+    ; { - Start array collection using separate buffer
     inc r13                     ; Skip {
-    ; CRITICAL: Push R14 to memory before saving marker!
-    ; Otherwise items pushed before { are lost (they're only in R14)
-    mov [r15], r14
-    add r15, 8
-    mov [rbp], r15              ; Save marker AFTER pushing R14
-    sub rbp, 8
+    ; Initialize collection buffer
+    mov qword [array_collect_ptr], array_collect_buffer
     mov byte [array_mode], 1    ; Enable auto-tick mode
     jmp .iline_parse_loop
 
 .iline_handle_array_end:
-    ; } - Create array from marker and exit array mode
+    ; } - Create array from collection buffer
     inc r13                     ; Skip }
     mov byte [array_mode], 0    ; Disable auto-tick mode
-    add rbp, 8
-    mov rbx, [rbp]              ; Get marker
-    ; Count elements
-    mov rcx, r15
-    sub rcx, rbx
-    shr rcx, 3                  ; Divide by 8
-    ; Allocate array
+
+    ; Calculate element count from collection buffer
+    mov rcx, [array_collect_ptr]
+    sub rcx, array_collect_buffer
+    shr rcx, 3                  ; Count in qwords
+
+    ; Allocate array object
     push rcx
-    push rbx
     shl rcx, 3
-    add rcx, 16                 ; Header
+    add rcx, 16                 ; Add header size
     call allocate_object
-    pop rbx
     pop rcx
-    ; Fill header
+
+    ; Fill array header
     mov qword [rax], TYPE_ARRAY
     mov [rax+8], rcx
-    ; Copy elements
+
+    ; Copy from collection buffer to array
     lea rdi, [rax+16]
-    mov rsi, rbx
-.iline_copy_arr:
+    mov rsi, array_collect_buffer
+    push rcx
+.copy_loop:
     test rcx, rcx
-    jz .iline_arr_done
+    jz .copy_done
     movsq
     dec rcx
-    jmp .iline_copy_arr
-.iline_arr_done:
-    ; Array replaces all collected items (from marker onwards)
-    ; Keep stack items that were before the {
-    ; Stack was: [... stuff before { ] [ items collected ]
-    ; Becomes:   [... stuff before { ] [ array ]
-    mov r15, rbx                ; Reset to marker position
-    add r15, 8                  ; One slot for the array
-    mov r14, rax                ; Array becomes TOS
+    jmp .copy_loop
+.copy_done:
+    pop rcx
+
+    ; Push array to Forth stack (normal push - preserves items before {)
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
     jmp .iline_parse_loop
 
 .iline_done:
@@ -5331,44 +5393,19 @@ interpret_line:
 exec_definition:
     push r13
 
+    ; Simple debug: mark entry
     push rax
-    push rsi
-    mov rsi, debug_exec_def_enter
-    call serial_print
-    mov rsi, debug_exec_def_rsi
-    call serial_print
-    mov rax, [rsp]              ; RSI value
-    call serial_print_hex
-    mov al, 10
-    call serial_putchar
-    pop rsi
+    mov al, 'E'
+    call emit_char
     pop rax
 
 .exec_def_loop:
-    ; Debug: about to lodsq
-    push rax
-    push rsi
-    mov rsi, debug_exec_def_lodsq
-    call serial_print
-    mov rax, [rsp]
-    call serial_print_hex
-    mov al, 10
-    call serial_putchar
-    pop rsi
-    pop rax
-
     lodsq
 
-    ; Debug each instruction
+    ; Debug each instruction with simple marker
     push rax
-    push rsi
-    mov rsi, debug_exec_def_instr
-    call serial_print
-    mov rax, [rsp+8]
-    call serial_print_hex
-    mov al, 10
-    call serial_putchar
-    pop rsi
+    mov al, 'X'
+    call emit_char
     pop rax
 
     cmp rax, EXIT
@@ -5719,6 +5756,8 @@ app_saved_sp: dq 0              ; Saved stack pointer (R15) when entering app
 app_active: dq 0                ; 1 if inside app context, 0 otherwise
 array_mode: db 0                ; 1 if inside array literal, 0 otherwise
 compile_mode: db 0              ; 0 = interpret, 1 = compile
+array_collect_buffer: times 64 dq 0  ; Temporary buffer for array collection
+array_collect_ptr: dq 0         ; Pointer into collection buffer
 dict_here: dq dictionary_space  ; Next free space in dictionary
 dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)
 compile_buffer: times 256 dq 0  ; Compilation buffer
