@@ -1,4 +1,4 @@
-; Simplicity OS - 64-bit Forth Kernel
+; Simplicity v0.3 - 64-bit RPN "Lego" OS Kernel
 ; Loaded at 0x10000 by stage2 after mode transitions
 ; Contains: REPL, all assembly primitives, and Forth interpreter
 
@@ -682,12 +682,7 @@ test_program:
 
 ; Interactive REPL in assembly
 REPL:
-    ; Print banner
-    mov rax, str_banner
-    call print_string
-    call newline
-
-    ; Initialize stacks
+    ; Initialize stacks (banner already shown during boot)
     ; R15 points one past last item, R14 holds TOS
     mov r15, forth_stack    ; Data stack base
     mov r14, 0              ; Top of stack (TOS) - empty initially
@@ -1010,19 +1005,6 @@ create_dict_entry:
 .aligned:
 
     ; Store code pointer (DOCOL)
-    push rax
-    mov al, '<'
-    call emit_char
-    mov al, 'D'
-    call emit_char
-    mov al, 'O'
-    call emit_char
-    mov al, 'C'
-    call emit_char
-    mov al, '>'
-    call emit_char
-    pop rax
-
     mov qword [rdi], DOCOL
     add rdi, 8
 
@@ -4760,42 +4742,15 @@ word_define:
     push rdi
     push rsi
 
-    ; Serial debug
-    push rsi
-    mov rsi, debug_define_start
-    call serial_print
-    pop rsi
-
     ; Get array from TOS (R14)
     mov rax, r14
     ; Validate it's an array
     cmp qword [rax], TYPE_ARRAY
     jne .define_error
 
-    ; Serial debug
-    push rsi
-    mov rsi, debug_define_arr_valid
-    call serial_print
-    pop rsi
-
     ; Get array count and data
     mov rcx, [rax+8]            ; Element count
     lea rsi, [rax+16]           ; Array data
-
-    ; Debug: show count
-    push rax
-    push rcx
-    mov al, 'N'
-    call emit_char
-    mov al, '='
-    call emit_char
-    pop rcx
-    push rcx
-    mov rax, rcx
-    add al, '0'
-    call emit_char
-    pop rcx
-    pop rax
 
     ; Copy array elements to compile_buffer
     mov rdi, compile_buffer
@@ -4822,39 +4777,16 @@ word_define:
     jnz .copy_name
 .name_copied:
 
-    ; Name extracted successfully
-
     ; Pop both array and name from stack
     sub r15, 16                 ; Remove two items
     mov r14, [r15]              ; New TOS
 
-    ; Ensure modes are reset (match word_semi behavior)
+    ; Ensure modes are reset
     mov byte [compile_mode], 0
     mov byte [array_mode], 0
 
-    ; Debug: show compile_ptr value before create_dict_entry
-    push rax
-    push rbx
-    mov al, 'P'
-    call emit_char
-    mov al, '='
-    call emit_char
-    mov rax, [compile_ptr]
-    sub rax, compile_buffer
-    shr rax, 3
-    add al, '0'
-    call emit_char
-    pop rbx
-    pop rax
-
     ; Create dictionary entry
     call create_dict_entry
-
-    ; Serial debug: entry created
-    push rsi
-    mov rsi, debug_define_entry_created
-    call serial_print
-    pop rsi
 
     pop rsi
     pop rdi
@@ -5081,22 +5013,6 @@ interpret_line:
     ; Check if dictionary word
     push rax
     mov rbx, [rax]
-
-    ; Debug: show if it's a dict word
-    cmp rbx, DOCOL
-    je .is_dict_debug
-    push rax
-    mov al, 'B'
-    call emit_char
-    pop rax
-    jmp .not_dict_debug
-.is_dict_debug:
-    push rax
-    mov al, 'D'
-    call emit_char
-    pop rax
-.not_dict_debug:
-
     cmp rbx, DOCOL
     pop rax
     je .iline_dict_word
@@ -5118,27 +5034,10 @@ interpret_line:
 
 .iline_dict_word:
     ; Execute dictionary word using the standard mechanism
-    push rax
-    mov al, 'D'
-    call emit_char
-    pop rax
-
     push r13                    ; Save parse position
     add rax, 8                  ; Skip code pointer
     mov rsi, rax
-
-    push rax
-    mov al, 'C'
-    call emit_char
-    pop rax
-
     call exec_definition
-
-    push rax
-    mov al, 'R'
-    call emit_char
-    pop rax
-
     pop r13
     jmp .iline_parse_loop
 
@@ -5392,22 +5291,8 @@ interpret_line:
 ; Input: RSI = pointer to definition body (after DOCOL)
 exec_definition:
     push r13
-
-    ; Simple debug: mark entry
-    push rax
-    mov al, 'E'
-    call emit_char
-    pop rax
-
 .exec_def_loop:
     lodsq
-
-    ; Debug each instruction with simple marker
-    push rax
-    mov al, 'X'
-    call emit_char
-    pop rax
-
     cmp rax, EXIT
     je .exec_def_done
 
@@ -5738,7 +5623,7 @@ debug_exec_def_lodsq: db '  lodsq from=', 0
 debug_exec_def_instr: db '  instr=', 0
 str_define_name_is: db '[NAME:', 0
 str_stack_dump: db '[STACK] ', 0
-str_banner: db 'Simplicity Forth REPL v0.3', 0
+str_banner: db 'Simplicity v0.3 - 64-bit RPN "Lego" OS', 0
 str_prompt: db '> ', 0
 str_ok: db ' ok', 0
 str_goodbye: db 'Goodbye!', 0
@@ -5792,4 +5677,4 @@ cursor: dq 0xB8000 + 160
 ; Dictionary space (4KB for user-defined words)
 dictionary_space: times 4096 db 0
 
-msg64: db 'Simplicity OS v0.2 - 64-bit Forth', 0
+msg64: db 'Simplicity v1.0 - 64-bit RPN "Lego" OS', 0
