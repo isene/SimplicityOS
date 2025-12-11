@@ -226,11 +226,23 @@ print_number:
     mov rbx, 10
     xor rcx, rcx
 
+    ; Check for zero
     test rax, rax
-    jnz .conv
+    jnz .check_neg
     mov al, '0'
     call emit_char
     jmp .done
+
+.check_neg:
+    ; Check if negative (signed)
+    test rax, rax
+    jns .conv               ; Jump if not negative
+    ; Print minus sign
+    push rax
+    mov al, '-'
+    call emit_char
+    pop rax
+    neg rax                 ; Make positive
 
 .conv:
     xor rdx, rdx
@@ -1536,6 +1548,15 @@ is_number:
     jz .not_number
 
     mov rbx, rdi
+
+    ; Check for leading minus sign
+    mov al, [rbx]
+    cmp al, '-'
+    jne .check_loop
+    inc rbx
+    dec rcx
+    jz .not_number              ; Just "-" is not a number
+
 .check_loop:
     mov al, [rbx]
     cmp al, '0'
@@ -1563,9 +1584,18 @@ parse_number:
     push rbx
     push rcx
     push rdi
+    push r9
 
     xor rax, rax            ; Result
     mov rbx, 10             ; Base
+    xor r9, r9              ; Negative flag
+
+    ; Check for leading minus
+    cmp byte [rdi], '-'
+    jne .loop
+    mov r9, 1               ; Set negative flag
+    inc rdi
+    dec rcx
 
 .loop:
     movzx r8, byte [rdi]
@@ -1576,6 +1606,13 @@ parse_number:
     dec rcx
     jnz .loop
 
+    ; Negate if needed
+    test r9, r9
+    jz .parse_done
+    neg rax
+
+.parse_done:
+    pop r9
     pop rdi
     pop rcx
     pop rbx
@@ -6417,9 +6454,31 @@ word_define:
     mov rcx, [rax+8]            ; Element count
     lea rsi, [rax+16]           ; Array data
 
-    ; Copy array elements to compile_buffer
+    ; Copy array elements to compile_buffer, wrapping literals with LIT
+    ; Numbers need LIT prefix, word references are stored directly
     mov rdi, compile_buffer
-    rep movsq
+.define_copy_loop:
+    test rcx, rcx
+    jz .define_copy_done
+    lodsq                       ; Get element into RAX
+    ; Check if literal: negative OR < 0x10000 (kernel starts at 0x10000)
+    test rax, rax
+    js .define_is_literal       ; Negative number
+    cmp rax, 0x10000
+    jb .define_is_literal       ; Small positive number
+    ; It's a reference - store directly
+    mov [rdi], rax
+    add rdi, 8
+    dec rcx
+    jmp .define_copy_loop
+.define_is_literal:
+    ; Wrap with LIT
+    mov qword [rdi], LIT
+    mov [rdi+8], rax
+    add rdi, 16
+    dec rcx
+    jmp .define_copy_loop
+.define_copy_done:
     mov [compile_ptr], rdi
 
     ; Get name from [r15-8] (second on stack, array is TOS in R14)
