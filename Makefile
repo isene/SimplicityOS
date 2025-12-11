@@ -52,7 +52,7 @@ $(STAGE2_BIN): $(BOOT_DIR)/stage2.asm
 	$(NASM) -f bin -o $@ $<
 	@echo "✓ Stage2 assembled ($$(stat -c%s $@) bytes)"
 
-# Kernel (64-bit Forth system)
+# Kernel (64-bit RPN system)
 $(KERNEL_BIN): $(KERNEL_DIR)/simplicity.asm
 	@echo "→ Assembling kernel..."
 	$(NASM) -f bin -o $@ $<
@@ -84,9 +84,9 @@ $(IMAGE): $(BOOT_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
 	@cat $(KERNEL_BIN) >> $@
 	@# Pad to floppy size
 	@truncate -s $(IMAGE_SIZE) $@
-	@# Pack Forth apps into disk image (directory at sector 200)
+	@# Pack apps into disk image (directory at sector 200)
 	@if [ -d "$(APPS_DIR)" ] && [ -n "$$(ls -A $(APPS_DIR)/*.forth 2>/dev/null)" ]; then \
-		echo "→ Packing Forth apps..."; \
+		echo "→ Packing apps..."; \
 		$(TOOLS_DIR)/pack-apps.sh $@ $(APPS_DIR); \
 	fi
 	@echo "✓ Disk image created ($$(stat -c%s $@) bytes)"

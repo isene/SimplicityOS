@@ -1,6 +1,6 @@
-; Simplicity v0.3 - 64-bit RPN "Lego" OS Kernel
+; Simplicity - 64-bit RPN "Lego" OS Kernel
 ; Loaded at 0x10000 by stage2 after mode transitions
-; Contains: REPL, all assembly primitives, and Forth interpreter
+; Contains: REPL, assembly primitives, and RPN interpreter
 
 [BITS 64]
 [ORG 0x10000]
@@ -31,18 +31,18 @@ long_mode_64:
     jmp .loop
 .done:
 
-    ; Initialize Forth (64-bit)
+    ; Initialize RPN interpreter (64-bit)
     mov rsp, 0x80000        ; Data stack
     mov rbp, 0x90000        ; Return stack (away from page tables at 0x70000)
     mov rsi, test_program   ; Instruction pointer
     jmp NEXT
 
-; NEXT - Forth inner interpreter (64-bit)
+; NEXT - Inner interpreter (64-bit)
 NEXT:
     lodsq                   ; Load qword
     jmp rax
 
-; Core Forth words (64-bit)
+; Core words (64-bit)
 
 DUP:
     mov rax, [rsp]
@@ -166,12 +166,12 @@ ZBRANCH:
     mov rbx, r14            ; Save TOS for test
     ; Pop TOS using R14/R15 convention
     sub r15, 8
-    cmp r15, forth_stack
-    jl .zbranch_empty_prim  ; Use jl not jle - R15==forth_stack means valid element at [R15]
+    cmp r15, data_stack
+    jl .zbranch_empty_prim  ; Use jl not jle - R15==data_stack means valid element at [R15]
     mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
     jmp .zbranch_test_prim
 .zbranch_empty_prim:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
 .zbranch_test_prim:
     test rbx, rbx
@@ -684,12 +684,13 @@ test_program:
 REPL:
     ; Initialize stacks (banner already shown during boot)
     ; R15 points one past last item, R14 holds TOS
-    mov r15, forth_stack    ; Data stack base
+    mov r15, data_stack    ; Data stack base
     mov r14, 0              ; Top of stack (TOS) - empty initially
     mov rbp, 0x90000        ; Return stack (away from page tables at 0x70000) (grows down)
 
     ; Load embedded apps (defines editor, invaders words)
     call load_apps
+    mov qword [app_loading], 0  ; Done loading, enable def source saving
 
 .main_loop:
     ; Print prompt
@@ -713,11 +714,18 @@ REPL:
     cmp al, 127                     ; Delete?
     je .handle_delete
 
-    cmp al, 27                      ; Escape (arrow keys)?
-    je .handle_escape
+    ; Arrow keys (KEY_UP=257, KEY_DOWN=258, KEY_LEFT=259, KEY_RIGHT=260)
+    cmp rax, KEY_UP
+    je .arrow_up
+    cmp rax, KEY_DOWN
+    je .arrow_down
+    cmp rax, KEY_LEFT
+    je .arrow_left
+    cmp rax, KEY_RIGHT
+    je .arrow_right
 
     cmp al, 32                      ; Printable?
-    jl .read_char                   ; Ignore control chars
+    jl .read_char                   ; Ignore other control chars
 
     ; Regular character - insert at cursor
     cmp rcx, 79                     ; Max line length?
@@ -729,10 +737,12 @@ REPL:
     je .insert_at_end
 
     ; Shift characters right from cursor position
+    ; Start at last char (rcx-1), copy to rcx, work backwards
     mov rsi, input_buffer
-    add rsi, rcx                    ; End of string
+    add rsi, rcx
+    dec rsi                         ; rsi = last char position (rcx-1)
     mov rdi, rsi
-    inc rdi                         ; One position right
+    inc rdi                         ; rdi = one position right (rcx)
     mov r9, rcx
     sub r9, [cursor_pos]            ; Chars to shift
 .shift_right:
@@ -752,10 +762,13 @@ REPL:
     add rsi, [cursor_pos]
     mov [rsi], al
     inc rcx                         ; Increase length
-    inc qword [cursor_pos]          ; Move cursor right
 
-    ; Echo character (simple for now)
-    call emit_char
+    ; Redraw from current position (before incrementing cursor)
+    call redraw_line
+
+    ; Now move cursor forward
+    inc qword [cursor_pos]
+    call update_cursor_display
     jmp .read_char
 
 .handle_backspace:
@@ -818,24 +831,6 @@ REPL:
     call redraw_line
     jmp .read_char
 
-.handle_escape:
-    ; Read next character
-    call wait_key
-    cmp al, 91                      ; '[' ?
-    jne .read_char                  ; Not an arrow, ignore
-
-    ; Read arrow key code
-    call wait_key
-    cmp al, 67                      ; 'C' = Right arrow
-    je .arrow_right
-    cmp al, 68                      ; 'D' = Left arrow
-    je .arrow_left
-    cmp al, 65                      ; 'A' = Up arrow
-    je .arrow_up
-    cmp al, 66                      ; 'B' = Down arrow
-    je .arrow_down
-    jmp .read_char                  ; Unknown, ignore
-
 .arrow_left:
     mov rax, [cursor_pos]
     test rax, rax
@@ -853,32 +848,47 @@ REPL:
     jmp .read_char
 
 .arrow_up:
-    call history_prev
-    ; Load new line length
-    mov rcx, [line_length]
-    ; Redraw line to show history entry
-    ; For now, simple: clear line and reprint
+    ; Check if we can go back in history
+    push rax
+    mov rax, [history_index]
+    test rax, rax
+    pop rax
+    jz .read_char                   ; Already at oldest or no history
+    ; Clear BEFORE history_prev (while cursor_pos is still old value)
     call clear_current_line
+    call history_prev
+    ; Reload line from history
+    mov rcx, [line_length]
+    ; Reprint loaded line
     call reprint_line
+    call update_hw_cursor           ; Sync hardware cursor
     jmp .read_char
 
 .arrow_down:
-    call history_next
-    ; Load new line length
-    mov rcx, [line_length]
-    ; Redraw
+    ; Check if we can go forward in history
+    push rax
+    mov rax, [history_index]
+    cmp rax, [history_count]
+    pop rax
+    jge .read_char                  ; Already at newest
+    ; Clear BEFORE history_next (while cursor_pos is still old value)
     call clear_current_line
+    call history_next
+    ; Reload line from history
+    mov rcx, [line_length]
+    ; Reprint loaded line
     call reprint_line
+    call update_hw_cursor           ; Sync hardware cursor
     jmp .read_char
 
 .execute_line:
-    ; Save to history before executing
-    call save_to_history
-
-    ; Null-terminate input
+    ; Null-terminate input FIRST (before saving to history)
     mov rsi, input_buffer
     add rsi, rcx
     mov byte [rsi], 0
+
+    ; Save to history (now properly null-terminated)
+    call save_to_history
 
     call newline
 
@@ -959,43 +969,70 @@ reprint_line:
     ret
 
 redraw_line:
-    ; Full redraw (used by editing operations)
-    ; For now, just ensure characters appear
-    ret
-
-update_cursor_display:
-    ; Move VGA cursor left or right without redrawing
-    ; Cursor should be at: prompt_start + cursor_pos
+    ; Redraw from cursor position to end of line
+    ; RCX = total line length, cursor_pos = where we are
     push rax
     push rbx
+    push rcx
+    push rsi
 
-    ; Get current cursor position in characters
+    ; Print characters from cursor_pos to end
+    mov rsi, input_buffer
+    add rsi, [cursor_pos]
+    mov rbx, rcx
+    sub rbx, [cursor_pos]           ; Characters to print
+.print_loop:
+    test rbx, rbx
+    jz .print_done
+    lodsb
+    call emit_char
+    dec rbx
+    jmp .print_loop
+.print_done:
+
+    ; Move cursor back to correct position
+    mov rbx, rcx
+    sub rbx, [cursor_pos]           ; How many chars we printed
+    shl rbx, 1                      ; Convert to VGA offset
     mov rax, [cursor]
-    sub rax, 0xB8000
-    shr rax, 1                      ; Convert to character position
-
-    ; Calculate desired position: row_start + 2 (prompt) + cursor_pos
-    mov rbx, rax
-    ; Get row
-    xor rdx, rdx
-    mov rcx, 80
-    div rcx                         ; RAX = row, RDX = column
-
-    ; New column = 2 (prompt "> ") + cursor_pos
-    mov rdx, 2
-    add rdx, [cursor_pos]
-
-    ; Calculate new position: row * 80 + column
-    mov rcx, 80
-    mul rcx
-    add rax, rdx
-
-    ; Convert back to VGA address
-    shl rax, 1
-    add rax, 0xB8000
+    sub rax, rbx
     mov [cursor], rax
     call update_hw_cursor
 
+    pop rsi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+update_cursor_display:
+    ; Move VGA cursor to match cursor_pos
+    push rax
+    push rbx
+    push rcx
+    push rdx
+
+    ; Get current line position (cursor / 160 = row)
+    mov rax, [cursor]
+    sub rax, 0xB8000
+    xor rdx, rdx
+    mov rcx, 160                    ; Bytes per row (80 chars * 2)
+    div rcx                         ; RAX = row
+
+    ; Calculate new position: row * 160 + (2 + cursor_pos) * 2
+    mov rcx, 160
+    mul rcx                         ; RAX = row * 160
+    mov rbx, [cursor_pos]
+    add rbx, 2                      ; Add prompt length
+    shl rbx, 1                      ; Convert to bytes (* 2)
+    add rax, rbx                    ; RAX = byte offset
+    add rax, 0xB8000                ; Add VGA base
+
+    mov [cursor], rax
+    call update_hw_cursor
+
+    pop rdx
+    pop rcx
     pop rbx
     pop rax
     ret
@@ -1344,12 +1381,12 @@ DOCOL:
     mov rbx, r14            ; Get TOS
     ; Pop TOS using R14/R15 convention
     sub r15, 8
-    cmp r15, forth_stack
-    jl .zbranch_empty_docol ; Use jl not jle - R15==forth_stack means valid element at [R15]
+    cmp r15, data_stack
+    jl .zbranch_empty_docol ; Use jl not jle - R15==data_stack means valid element at [R15]
     mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
     jmp .zbranch_test
 .zbranch_empty_docol:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
 .zbranch_test:
     test rbx, rbx
@@ -2706,43 +2743,79 @@ lookup_word:
 .try_disk_write:
     ; disk-write (10 chars) - write sector to disk
     cmp rcx, 10
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi], 'd'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+1], 'i'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+2], 's'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+3], 'k'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+4], '-'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+5], 'w'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+6], 'r'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+7], 'i'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+8], 't'
-    jne .try_ed
+    jne .try_load
     cmp byte [rdi+9], 'e'
     jne .try_load
     mov rax, word_disk_write
     jmp .done
 
 .try_load:
-    ; load (4 chars) - load and run Forth app from disk
+    ; load (4 chars) - load and run app from disk
     cmp rcx, 4
-    jne .try_ed
+    jne .try_save
     cmp byte [rdi], 'l'
-    jne .try_ed
+    jne .try_save
     cmp byte [rdi+1], 'o'
-    jne .try_ed
+    jne .try_save
     cmp byte [rdi+2], 'a'
-    jne .try_ed
+    jne .try_save
     cmp byte [rdi+3], 'd'
-    jne .try_ed
+    jne .try_save
     mov rax, word_load
+    jmp .done
+
+.try_save:
+    ; save (4 chars) - save user definitions to disk
+    cmp rcx, 4
+    jne .try_restore
+    cmp byte [rdi], 's'
+    jne .try_restore
+    cmp byte [rdi+1], 'a'
+    jne .try_restore
+    cmp byte [rdi+2], 'v'
+    jne .try_restore
+    cmp byte [rdi+3], 'e'
+    jne .try_restore
+    mov rax, word_save
+    jmp .done
+
+.try_restore:
+    ; restore (7 chars) - load user definitions from disk
+    cmp rcx, 7
+    jne .try_ed
+    cmp byte [rdi], 'r'
+    jne .try_ed
+    cmp byte [rdi+1], 'e'
+    jne .try_ed
+    cmp byte [rdi+2], 's'
+    jne .try_ed
+    cmp byte [rdi+3], 't'
+    jne .try_ed
+    cmp byte [rdi+4], 'o'
+    jne .try_ed
+    cmp byte [rdi+5], 'r'
+    jne .try_ed
+    cmp byte [rdi+6], 'e'
+    jne .try_ed
+    mov rax, word_restore
     jmp .done
 
 .try_ed:
@@ -2771,7 +2844,7 @@ lookup_word:
     pop rbx
     ret
 
-; Word implementations for REPL (using R15 as Forth stack)
+; Word implementations for REPL (using R15 as data stack)
 word_plus:
     ; Add: pop second, add to TOS (in R14)
     sub r15, 8
@@ -3081,10 +3154,10 @@ word_dot:
 
 .dot_done:
     ; Pop: decrement depth, load new TOS from memory
-    ; Convention: depth = (R15 - forth_stack) / 8
+    ; Convention: depth = (R15 - data_stack) / 8
     ; After pop: depth decreases by 1
     sub r15, 8
-    cmp r15, forth_stack
+    cmp r15, data_stack
     jle .dot_empty
     ; Still have items - load new TOS from memory
     mov r14, [r15 - 8]      ; mem[depth-2] becomes new TOS
@@ -3092,7 +3165,7 @@ word_dot:
 
 .dot_empty:
     ; Stack is now empty
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14            ; R14 undefined, set to 0
     ret
 
@@ -3103,7 +3176,7 @@ word_dots:
     ; Shows type-aware representation: 42 "str" [arr:3] (ref)
     ; Convention: depth = (R15 - stack_base) / 8
     ; Depth 0: empty, Depth N: TOS in R14, rest in mem[0..N-2]
-    ; App-aware: uses app_stack when app_active, else forth_stack
+    ; App-aware: uses app_stack when app_active, else data_stack
     push rax
     push rbx
     push rcx
@@ -3111,7 +3184,7 @@ word_dots:
     push r8                 ; R8 = stack base
 
     ; Get correct stack base
-    mov r8, forth_stack
+    mov r8, data_stack
     cmp qword [app_active], 0
     je .have_base
     mov r8, app_stack
@@ -3269,12 +3342,12 @@ word_dup:
 word_drop:
     ; Drop TOS: decrement depth, load new TOS from memory
     sub r15, 8
-    cmp r15, forth_stack
+    cmp r15, data_stack
     jle .drop_empty
     mov r14, [r15 - 8]
     ret
 .drop_empty:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
     ret
 
@@ -3479,7 +3552,7 @@ word_execute:
     jne .check_branch
     ; LIT - push next value
     lodsq
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .lit_first
     mov [r15-8], r14
     add r15, 8
@@ -3506,12 +3579,12 @@ word_execute:
     mov rbx, r14            ; Get TOS
     ; Pop TOS using R14/R15 convention
     sub r15, 8
-    cmp r15, forth_stack
-    jl .zbranch_empty       ; Use jl not jle - R15==forth_stack means valid element at [R15]
+    cmp r15, data_stack
+    jl .zbranch_empty       ; Use jl not jle - R15==data_stack means valid element at [R15]
     mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
     jmp .zbranch_check
 .zbranch_empty:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
 .zbranch_check:
     test rbx, rbx
@@ -3664,7 +3737,7 @@ word_type_new:
     mov rax, [next_type_tag]
 
     ; Push to TOS
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .tn_first
     mov [r15-8], r14
     add r15, 8
@@ -3684,12 +3757,12 @@ word_type_name:
     ; TYPE-NAME - Associate name with type ( str type_tag -- )
     ; str must be a STRING object, type_tag is the type number
     ; Stack before: ... str type_tag (R14=type_tag)
-    ; Memory layout: [forth_stack]=str (depth 2, R15=forth_stack+16)
+    ; Memory layout: [data_stack]=str (depth 2, R15=data_stack+16)
     mov rbx, r14            ; RBX = type_tag
 
     ; Pop type_tag, get str
-    sub r15, 8              ; Pop type_tag (R15 now = forth_stack + 8)
-    mov rax, [r15-8]        ; RAX = str at [forth_stack + 0]
+    sub r15, 8              ; Pop type_tag (R15 now = data_stack + 8)
+    mov rax, [r15-8]        ; RAX = str at [data_stack + 0]
 
     ; Validate type_tag >= TYPE_USER_BASE
     cmp rbx, TYPE_USER_BASE
@@ -3706,20 +3779,20 @@ word_type_name:
 
     ; Pop str, load new TOS
     sub r15, 8
-    cmp r15, forth_stack
+    cmp r15, data_stack
     jle .tn_empty
     mov r14, [r15-8]        ; Load new TOS from memory
     ret
 
 .tn_empty:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
     ret
 
 .tn_invalid:
     ; Invalid type tag - just clean stack (pop both)
     sub r15, 8              ; Already decremented once, decrement again
-    cmp r15, forth_stack
+    cmp r15, data_stack
     jle .tn_empty
     mov r14, [r15-8]
     ret
@@ -3881,12 +3954,12 @@ word_screen_set:
 
     ; Pop both, load new TOS
     sub r15, 8
-    cmp r15, forth_stack
+    cmp r15, data_stack
     jle .ss_empty
     mov r14, [r15]          ; Fixed: was [r15-8]
     ret
 .ss_empty:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
     ret
 
@@ -3913,12 +3986,12 @@ word_screen_char:
 
     ; Pop all four, load new TOS
     sub r15, 8
-    cmp r15, forth_stack
+    cmp r15, data_stack
     jle .sc_empty
     mov r14, [r15]          ; Fixed: was [r15-8]
     ret
 .sc_empty:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
     ret
 
@@ -3952,12 +4025,12 @@ word_screen_clear:
 
     ; Pop color, load new TOS
     sub r15, 8
-    cmp r15, forth_stack
+    cmp r15, data_stack
     jle .scl_empty
     mov r14, [r15]          ; Fixed: was [r15-8]
     ret
 .scl_empty:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
     ret
 
@@ -4022,12 +4095,12 @@ word_screen_scroll:
 .scroll_done:
     ; Pop n, load new TOS
     sub r15, 8
-    cmp r15, forth_stack
+    cmp r15, data_stack
     jle .scr_empty
     mov r14, [r15-8]
     ret
 .scr_empty:
-    mov r15, forth_stack
+    mov r15, data_stack
     xor r14, r14
     ret
 
@@ -4036,7 +4109,7 @@ word_key_check:
     call check_key
 
     ; Push to TOS
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .kc_first
     mov [r15-8], r14
     add r15, 8
@@ -4049,7 +4122,7 @@ word_key_check:
 
 word_key_escape:
     ; KEY-ESCAPE - Push escape key constant ( -- 256 )
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .ke_first
     mov [r15-8], r14
     add r15, 8
@@ -4062,7 +4135,7 @@ word_key_escape:
 
 word_key_up:
     ; KEY-UP - Push up arrow constant ( -- 257 )
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .ku_first
     mov [r15-8], r14
     add r15, 8
@@ -4075,7 +4148,7 @@ word_key_up:
 
 word_key_down:
     ; KEY-DOWN - Push down arrow constant ( -- 258 )
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .kd_first
     mov [r15-8], r14
     add r15, 8
@@ -4088,7 +4161,7 @@ word_key_down:
 
 word_key_left:
     ; KEY-LEFT - Push left arrow constant ( -- 259 )
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .kl_first
     mov [r15-8], r14
     add r15, 8
@@ -4101,7 +4174,7 @@ word_key_left:
 
 word_key_right:
     ; KEY-RIGHT - Push right arrow constant ( -- 260 )
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .kr_first
     mov [r15-8], r14
     add r15, 8
@@ -4337,15 +4410,15 @@ word_app_exit:
 
 word_app_stack:
     ; APP-STACK - Push current stack base address ( -- addr )
-    ; Returns app_stack if in app, forth_stack otherwise
+    ; Returns app_stack if in app, data_stack otherwise
 
-    mov rax, forth_stack
+    mov rax, data_stack
     cmp qword [app_active], 0
     je .use_main
     mov rax, app_stack
 .use_main:
     ; Push to TOS
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .as_first
     mov [r15-8], r14
     add r15, 8
@@ -4360,7 +4433,7 @@ word_app_depth:
     ; APP-DEPTH - Push current stack depth ( -- n )
     ; Calculate: (R15 - stack_base) / 8
 
-    mov rax, forth_stack
+    mov rax, data_stack
     cmp qword [app_active], 0
     je .use_main_depth
     mov rax, app_stack
@@ -4370,7 +4443,7 @@ word_app_depth:
     shr rbx, 3                  ; Divide by 8
 
     ; Push to TOS
-    cmp r15, forth_stack
+    cmp r15, data_stack
     je .ad_first
     cmp r15, app_stack
     je .ad_first
@@ -4587,7 +4660,263 @@ word_disk_write:
     ret
 
 ; ============================================================
-; LOAD - Load and run Forth app from disk
+; SAVE - Save user definitions source to disk
+; Stack: ( -- )
+; Writes def_src_buffer (8 sectors = 4KB) to sector 250+
+; ============================================================
+word_save:
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+
+    ; Print status
+    mov rax, str_saving
+    call print_string
+
+    ; Write 8 sectors (4KB total)
+    mov rbx, DEF_SAVE_SECTOR    ; Starting sector
+    mov rsi, def_src_buffer     ; Source address
+    mov rcx, 8                  ; 8 sectors
+.save_sector:
+    push rcx
+    push rsi
+    push rbx
+
+    ; Direct disk write (sector in EBX, source in RSI)
+    mov eax, ebx                ; Sector number
+    call disk_write_direct
+
+    pop rbx
+    pop rsi
+    pop rcx
+
+    add rsi, 512                ; Next 512 bytes
+    inc rbx                     ; Next sector
+    dec rcx
+    jnz .save_sector
+
+    ; Print done
+    mov rax, str_done
+    call print_string
+    call newline
+
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+str_saving: db 'Saving...', 0
+str_done: db ' ok', 0
+
+; ============================================================
+; RESTORE - Load user definitions from disk and interpret
+; Stack: ( -- )
+; Reads from sector 250+ into def_src_buffer, then interprets
+; ============================================================
+word_restore:
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+
+    ; Print status
+    mov rax, str_loading
+    call print_string
+
+    ; Read 8 sectors (4KB total)
+    mov rbx, DEF_SAVE_SECTOR    ; Starting sector
+    mov rdi, def_src_buffer     ; Destination address
+    mov rcx, 8                  ; 8 sectors
+.load_sector:
+    push rcx
+    push rdi
+    push rbx
+
+    ; Direct disk read (sector in EBX, dest in RDI)
+    mov eax, ebx                ; Sector number
+    call disk_read_direct
+
+    pop rbx
+    pop rdi
+    pop rcx
+
+    add rdi, 512                ; Next 512 bytes
+    inc rbx                     ; Next sector
+    dec rcx
+    jnz .load_sector
+
+    ; Interpret loaded definitions
+    mov rsi, def_src_buffer
+    call interpret_source
+
+    ; Update def_src_ptr to end of loaded text
+    mov rsi, def_src_buffer
+.find_end:
+    cmp byte [rsi], 0
+    je .found_end
+    inc rsi
+    jmp .find_end
+.found_end:
+    mov [def_src_ptr], rsi
+
+    ; Print done
+    mov rax, str_done
+    call print_string
+    call newline
+
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+str_loading: db 'Restoring...', 0
+
+; ============================================================
+; Direct disk I/O (register-based, no stack manipulation)
+; ============================================================
+
+; disk_read_direct - Read 512 bytes
+; Input: EAX = sector, RDI = destination address
+disk_read_direct:
+    push rbx
+    push rcx
+    push rdx
+
+    mov ecx, eax                ; Save sector BEFORE wait loop corrupts AL
+
+    ; Wait for drive ready
+    mov dx, IDE_STATUS
+.drd_wait:
+    in al, dx
+    test al, 0x80
+    jnz .drd_wait
+
+    ; Set up LBA
+    mov dx, IDE_SECTOR_CNT
+    mov al, 1
+    out dx, al
+
+    mov dx, IDE_LBA_LOW
+    mov eax, ecx
+    out dx, al
+
+    mov dx, IDE_LBA_MID
+    mov al, ah
+    out dx, al
+
+    mov dx, IDE_LBA_HIGH
+    shr eax, 16
+    out dx, al
+
+    mov dx, IDE_DRIVE_HEAD
+    mov al, 0xE0
+    out dx, al
+
+    ; Read command
+    mov dx, IDE_COMMAND
+    mov al, IDE_CMD_READ
+    out dx, al
+
+    ; Wait for data
+    mov dx, IDE_STATUS
+.drd_drq:
+    in al, dx
+    test al, 0x08
+    jz .drd_drq
+
+    ; Read 256 words
+    mov dx, IDE_DATA
+    mov rcx, 256
+.drd_loop:
+    in ax, dx
+    stosw
+    dec rcx
+    jnz .drd_loop
+
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; disk_write_direct - Write 512 bytes
+; Input: EAX = sector, RSI = source address
+disk_write_direct:
+    push rbx
+    push rcx
+    push rdx
+
+    mov ecx, eax                ; Save sector BEFORE wait loop corrupts AL
+
+    ; Wait for drive ready
+    mov dx, IDE_STATUS
+.dwd_wait:
+    in al, dx
+    test al, 0x80
+    jnz .dwd_wait
+
+    ; Set up LBA
+    mov dx, IDE_SECTOR_CNT
+    mov al, 1
+    out dx, al
+
+    mov dx, IDE_LBA_LOW
+    mov eax, ecx
+    out dx, al
+
+    mov dx, IDE_LBA_MID
+    mov al, ah
+    out dx, al
+
+    mov dx, IDE_LBA_HIGH
+    shr eax, 16
+    out dx, al
+
+    mov dx, IDE_DRIVE_HEAD
+    mov al, 0xE0
+    out dx, al
+
+    ; Write command
+    mov dx, IDE_COMMAND
+    mov al, IDE_CMD_WRITE
+    out dx, al
+
+    ; Wait for DRQ
+    mov dx, IDE_STATUS
+.dwd_drq:
+    in al, dx
+    test al, 0x08
+    jz .dwd_drq
+
+    ; Write 256 words
+    mov dx, IDE_DATA
+    mov rcx, 256
+.dwd_loop:
+    lodsw
+    out dx, ax
+    dec rcx
+    jnz .dwd_loop
+
+    ; Flush
+    mov dx, IDE_COMMAND
+    mov al, 0xE7
+    out dx, al
+
+    mov dx, IDE_STATUS
+.dwd_flush:
+    in al, dx
+    test al, 0x80
+    jnz .dwd_flush
+
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; ============================================================
+; LOAD - Load and run app from disk
 ; Stack: ( name-string -- )
 ; Reads app directory from sector 200, finds app, loads and runs
 ; ============================================================
@@ -4706,9 +5035,9 @@ word_load:
     call print_string
     call newline
 
-    ; Interpret the loaded Forth source
+    ; Interpret the loaded source
     mov rsi, APP_BUFFER_ADDR
-    call interpret_forth_buffer
+    call interpret_source
 
 .load_done:
     pop r13
@@ -5194,6 +5523,12 @@ word_define:
     ; Create dictionary entry
     call create_dict_entry
 
+    ; Save definition source for persistence (only from REPL, not during app load)
+    cmp qword [app_loading], 0
+    jne .skip_save_def
+    call save_def_source
+.skip_save_def:
+
     pop rsi
     pop rdi
     pop rcx
@@ -5271,14 +5606,60 @@ word_semi:
 
     ; Create dictionary entry
     call create_dict_entry
+
+    ; Save definition source for persistence (only from REPL, not during app load)
+    cmp qword [app_loading], 0
+    jne .skip_save              ; Don't save during app loading
+    call save_def_source
+.skip_save:
+    ret
+
+; Save current input line to definition source buffer
+save_def_source:
+    push rax
+    push rcx
+    push rsi
+    push rdi
+
+    ; Get destination pointer
+    mov rdi, [def_src_ptr]
+
+    ; Check if we have space (leave room for null + newline)
+    mov rax, def_src_buffer
+    add rax, 4090               ; Max buffer - 6 bytes margin
+    cmp rdi, rax
+    jge .src_full               ; Buffer full, skip
+
+    ; Copy input_buffer to def_src_buffer (max 80 chars)
+    mov rsi, input_buffer
+    mov rcx, 80                 ; Safety limit
+.copy_loop:
+    lodsb
+    test al, al
+    jz .copy_done
+    stosb
+    dec rcx
+    jnz .copy_loop
+.copy_done:
+    ; Add newline
+    mov byte [rdi], 10
+    inc rdi
+    mov byte [rdi], 0           ; Keep null-terminated
+    mov [def_src_ptr], rdi
+
+.src_full:
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rax
     ret
 
 ; =============================================================
-; interpret_forth_buffer - Interpret Forth source from memory
-; Input: RSI = pointer to null-terminated Forth source
-; Preserves: R14, R15, RBP (Forth stacks)
+; interpret_source - Interpret RPN source from memory
+; Input: RSI = pointer to null-terminated source
+; Preserves: R14, R15, RBP (stacks)
 ; =============================================================
-interpret_forth_buffer:
+interpret_source:
     push rbx
     push r12
     push r13
@@ -5429,7 +5810,7 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_push_ref:
-    ; Array mode - store to collection buffer, not Forth stack
+    ; Array mode - store to collection buffer, not data stack
     push rbx
     mov rbx, [array_collect_ptr]
     mov [rbx], rax              ; Store reference
@@ -5680,7 +6061,7 @@ interpret_line:
 .copy_done:
     pop rcx
 
-    ; Push array to Forth stack (normal push - preserves items before {)
+    ; Push array to data stack (normal push - preserves items before {)
     mov [r15], r14
     add r15, 8
     mov r14, rax
@@ -5818,7 +6199,7 @@ serial_print:
     ret
 
 ; load_apps - Load apps from disk at boot
-; Uses the disk catalog at sector 200 to load Forth apps
+; Uses the disk catalog at sector 200 to load apps
 load_apps:
     push rbx
     push r12
@@ -5969,9 +6350,9 @@ load_app_by_cstring:
     ; Null-terminate the loaded code
     mov byte [rdi], 0
 
-    ; Interpret the loaded Forth source
+    ; Interpret the loaded source
     mov rsi, APP_BUFFER_ADDR
-    call interpret_forth_buffer
+    call interpret_source
 
 .labc_done:
     pop r13
@@ -6043,13 +6424,14 @@ cursor_pos: dq 0                     ; Cursor position in current line
 line_length: dq 0                    ; Current line length (for history)
 shift_state: db 0
 ctrl_state: db 0
-forth_stack: times 64 dq 0      ; Forth data stack (64 cells)
+data_stack: times 64 dq 0      ; Data stack (64 cells)
 
 ; App stack isolation
 app_stack: times 64 dq 0        ; Separate stack for apps (64 cells)
 app_saved_tos: dq 0             ; Saved TOS (R14) when entering app
 app_saved_sp: dq 0              ; Saved stack pointer (R15) when entering app
 app_active: dq 0                ; 1 if inside app context, 0 otherwise
+app_loading: dq 1               ; 1 during boot app loading, 0 after (starts at 1)
 array_mode: db 0                ; 1 if inside array literal, 0 otherwise
 compile_mode: db 0              ; 0 = interpret, 1 = compile
 array_collect_buffer: times 64 dq 0  ; Temporary buffer for array collection
@@ -6088,4 +6470,9 @@ cursor: dq 0xB8000 + 160
 ; Dictionary space (4KB for user-defined words)
 dictionary_space: times 4096 db 0
 
-msg64: db 'Simplicity v1.0 - 64-bit RPN "Lego" OS', 0
+; Definition source storage (for SAVE/LOAD persistence)
+def_src_buffer: times 4096 db 0     ; Stores source text of definitions
+def_src_ptr: dq def_src_buffer      ; Next free position
+DEF_SAVE_SECTOR equ 250             ; Disk sector for saved definitions
+
+msg64: db 'Simplicity v0.1 - 64-bit RPN "Lego" OS (v1.0 = Doom!)', 0
