@@ -2789,33 +2789,78 @@ lookup_word:
     cmp byte [rdi], 's'
     jne .try_restore
     cmp byte [rdi+1], 'a'
-    jne .try_restore
+    jne .try_sort_main
     cmp byte [rdi+2], 'v'
-    jne .try_restore
+    jne .try_sort_main
     cmp byte [rdi+3], 'e'
-    jne .try_restore
+    jne .try_sort_main
     mov rax, word_save
+    jmp .done
+
+.try_sort_main:
+    ; sort (4 chars) - sort array (already know rcx=4, rdi[0]='s')
+    cmp byte [rdi+1], 'o'
+    jne .try_restore
+    cmp byte [rdi+2], 'r'
+    jne .try_restore
+    cmp byte [rdi+3], 't'
+    jne .try_restore
+    mov rax, word_sort
     jmp .done
 
 .try_restore:
     ; restore (7 chars) - load user definitions from disk
     cmp rcx, 7
+    jne .try_info
+    cmp byte [rdi], 'r'
+    jne .try_info
+    cmp byte [rdi+1], 'e'
+    jne .try_info
+    cmp byte [rdi+2], 's'
+    jne .try_info
+    cmp byte [rdi+3], 't'
+    jne .try_info
+    cmp byte [rdi+4], 'o'
+    jne .try_info
+    cmp byte [rdi+5], 'r'
+    jne .try_info
+    cmp byte [rdi+6], 'e'
+    jne .try_info
+    mov rax, word_restore
+    jmp .done
+
+.try_info:
+    ; info (4 chars) - show word definition
+    cmp rcx, 4
+    jne .try_remove
+    cmp byte [rdi], 'i'
+    jne .try_remove
+    cmp byte [rdi+1], 'n'
+    jne .try_remove
+    cmp byte [rdi+2], 'f'
+    jne .try_remove
+    cmp byte [rdi+3], 'o'
+    jne .try_remove
+    mov rax, word_info
+    jmp .done
+
+.try_remove:
+    ; remove (6 chars) - delete user-defined word
+    cmp rcx, 6
     jne .try_ed
     cmp byte [rdi], 'r'
     jne .try_ed
     cmp byte [rdi+1], 'e'
     jne .try_ed
-    cmp byte [rdi+2], 's'
+    cmp byte [rdi+2], 'm'
     jne .try_ed
-    cmp byte [rdi+3], 't'
+    cmp byte [rdi+3], 'o'
     jne .try_ed
-    cmp byte [rdi+4], 'o'
+    cmp byte [rdi+4], 'v'
     jne .try_ed
-    cmp byte [rdi+5], 'r'
+    cmp byte [rdi+5], 'e'
     jne .try_ed
-    cmp byte [rdi+6], 'e'
-    jne .try_ed
-    mov rax, word_restore
+    mov rax, word_remove
     jmp .done
 
 .try_ed:
@@ -3039,11 +3084,16 @@ word_dot:
     push rcx
     push rdi
     mov rax, [rdi]
-    ; Recursively print element (simplified - just number for now)
+    ; Print element based on type
     cmp rax, 0x100000
     jl .arr_elem_int
-    ; Object element - print type tag
+    ; Object element - check type
     mov rbx, [rax]
+    cmp rbx, TYPE_STRING
+    je .arr_elem_string
+    cmp rbx, TYPE_REF
+    je .arr_elem_ref
+    ; Unknown object - print [type]
     push rax
     mov al, '['
     call emit_char
@@ -3052,6 +3102,26 @@ word_dot:
     mov al, ']'
     call emit_char
     pop rax
+    jmp .arr_elem_done
+.arr_elem_string:
+    ; Print string with quotes
+    push rax
+    mov al, '"'
+    call emit_char
+    pop rax
+    lea rax, [rax+16]       ; String data
+    call print_string
+    mov al, '"'
+    call emit_char
+    jmp .arr_elem_done
+.arr_elem_ref:
+    ; Print reference as ~name
+    push rax
+    mov al, '~'
+    call emit_char
+    pop rax
+    mov rax, [rax+16]       ; Ref name pointer
+    call print_string
     jmp .arr_elem_done
 .arr_elem_int:
     call print_number
@@ -4775,6 +4845,748 @@ word_restore:
 str_loading: db 'Restoring...', 0
 
 ; ============================================================
+; INFO - Show definition of a word
+; Stack: ( "name" -- )
+; Shows stack effect and description for builtins,
+; or source for user-defined words
+; ============================================================
+word_info:
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+    push rsi
+    push r8
+
+    ; Get name STRING from TOS
+    mov rax, r14
+    cmp qword [rax], TYPE_STRING
+    jne .info_not_string
+
+    ; Get name pointer and length
+    lea rdi, [rax+16]           ; Name string data
+    ; Calculate name length
+    xor rcx, rcx
+.info_namelen:
+    cmp byte [rdi+rcx], 0
+    je .info_gotlen
+    inc rcx
+    jmp .info_namelen
+.info_gotlen:
+    ; RCX = name length, RDI = name string
+    mov r8, rcx                 ; Save length in R8
+
+    ; First check builtin table
+    mov rsi, builtin_info_table
+.info_check_builtin:
+    cmp byte [rsi], 0           ; End of table?
+    je .info_try_user
+
+    ; Get builtin name length
+    push rdi
+    push rcx
+    mov rcx, r8                 ; Restore length
+    xor rbx, rbx
+.info_builtin_len:
+    cmp byte [rsi+rbx], 0
+    je .info_builtin_gotlen
+    inc rbx
+    jmp .info_builtin_len
+.info_builtin_gotlen:
+    ; RBX = builtin name length
+    cmp rbx, rcx
+    jne .info_next_builtin
+
+    ; Compare names
+    push rsi
+.info_cmp_builtin:
+    mov al, [rsi]
+    mov dl, [rdi]
+    cmp al, dl
+    jne .info_builtin_mismatch
+    inc rsi
+    inc rdi
+    dec rcx
+    jnz .info_cmp_builtin
+
+    ; Match! Print the description (follows the name + null)
+    pop rsi
+    add rsi, rbx
+    inc rsi                     ; Skip null after name
+    pop rcx
+    pop rdi
+
+    ; Print description
+    mov rax, rsi
+    call print_string
+    call newline
+    jmp .info_done
+
+.info_builtin_mismatch:
+    pop rsi
+    pop rcx
+    pop rdi
+    jmp .info_skip_name
+
+.info_next_builtin:
+    ; Skip to next entry (name + null + desc + null)
+    pop rcx
+    pop rdi
+.info_skip_name:
+    cmp byte [rsi], 0
+    je .info_skip_desc_start
+    inc rsi
+    jmp .info_skip_name
+.info_skip_desc_start:
+    inc rsi                     ; Skip null
+.info_skip_desc:
+    cmp byte [rsi], 0
+    je .info_next_entry
+    inc rsi
+    jmp .info_skip_desc
+.info_next_entry:
+    inc rsi                     ; Skip null
+    jmp .info_check_builtin
+
+.info_try_user:
+    ; Search def_src_buffer for user-defined word
+    mov rcx, r8                 ; Restore length
+    mov rsi, def_src_buffer
+.info_search:
+    cmp byte [rsi], 0
+    je .info_not_found
+
+    ; Check if this line matches: "name" { ... } define
+    ; or : name ... ;
+    push rsi
+    push rdi
+    push rcx
+
+    ; Skip leading whitespace
+.info_skipws:
+    cmp byte [rsi], ' '
+    jne .info_check_quote
+    inc rsi
+    jmp .info_skipws
+
+.info_check_quote:
+    ; Check for "name" { ... } define format
+    cmp byte [rsi], '"'
+    jne .info_check_colon
+    inc rsi                     ; Skip opening quote
+
+    ; Compare name
+.info_cmp_quoted:
+    mov al, [rsi]
+    mov dl, [rdi]
+    cmp al, dl
+    jne .info_next_line
+    inc rsi
+    inc rdi
+    dec rcx
+    jnz .info_cmp_quoted
+
+    ; Check for closing quote
+    cmp byte [rsi], '"'
+    jne .info_next_line
+    jmp .info_found
+
+.info_check_colon:
+    ; Check for : name format
+    cmp byte [rsi], ':'
+    jne .info_next_line
+    inc rsi
+    ; Skip space after colon
+    cmp byte [rsi], ' '
+    jne .info_next_line
+    inc rsi
+
+    ; Compare name
+.info_cmp_colon:
+    mov al, [rsi]
+    mov dl, [rdi]
+    cmp al, dl
+    jne .info_next_line
+    inc rsi
+    inc rdi
+    dec rcx
+    jnz .info_cmp_colon
+
+    ; Check for space or end after name
+    cmp byte [rsi], ' '
+    je .info_found
+    cmp byte [rsi], 0
+    je .info_found
+    cmp byte [rsi], 10
+    je .info_found
+    jmp .info_next_line
+
+.info_found:
+    pop rcx
+    pop rdi
+    pop rsi
+
+    ; Print this definition line
+    push rsi
+.info_print_line:
+    lodsb
+    cmp al, 0
+    je .info_print_done
+    cmp al, 10
+    je .info_print_done
+    call emit_char
+    jmp .info_print_line
+.info_print_done:
+    call newline
+    pop rsi
+    jmp .info_done
+
+.info_next_line:
+    pop rcx
+    pop rdi
+    pop rsi
+    ; Advance to next line
+.info_skip_line:
+    cmp byte [rsi], 0
+    je .info_not_found
+    cmp byte [rsi], 10
+    je .info_got_newline
+    inc rsi
+    jmp .info_skip_line
+.info_got_newline:
+    inc rsi
+    mov rcx, r8                 ; Restore length
+    jmp .info_search
+
+.info_not_found:
+    mov rax, str_info_notfound
+    call print_string
+    call newline
+    jmp .info_done
+
+.info_not_string:
+    mov rax, str_info_needstr
+    call print_string
+    call newline
+
+.info_done:
+    ; Pop name from stack
+    sub r15, 8
+    mov r14, [r15]
+
+    pop r8
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+str_info_notfound: db 'No definition found', 0
+str_info_needstr: db 'info requires STRING', 0
+
+; Builtin info table: name, null, description with stack effect, null
+; Terminated by double null
+builtin_info_table:
+    db '+', 0, '( a b -- a+b ) Add two numbers', 0
+    db '-', 0, '( a b -- a-b ) Subtract b from a', 0
+    db '*', 0, '( a b -- a*b ) Multiply two numbers', 0
+    db '/', 0, '( a b -- a/b ) Divide a by b', 0
+    db 'mod', 0, '( a b -- a%b ) Remainder of a/b', 0
+    db '=', 0, '( a b -- flag ) True if equal', 0
+    db '<', 0, '( a b -- flag ) True if a < b', 0
+    db '>', 0, '( a b -- flag ) True if a > b', 0
+    db '<>', 0, '( a b -- flag ) True if not equal', 0
+    db '<=', 0, '( a b -- flag ) True if a <= b', 0
+    db '>=', 0, '( a b -- flag ) True if a >= b', 0
+    db '0=', 0, '( n -- flag ) True if zero', 0
+    db 'and', 0, '( a b -- a&b ) Bitwise AND', 0
+    db 'or', 0, '( a b -- a|b ) Bitwise OR', 0
+    db 'xor', 0, '( a b -- a^b ) Bitwise XOR', 0
+    db 'not', 0, '( a -- ~a ) Bitwise NOT', 0
+    db '.', 0, '( x -- ) Print top of stack', 0
+    db '.s', 0, '( -- ) Print entire stack', 0
+    db 'dup', 0, '( a -- a a ) Duplicate top', 0
+    db 'drop', 0, '( a -- ) Discard top', 0
+    db 'swap', 0, '( a b -- b a ) Swap top two', 0
+    db 'rot', 0, '( a b c -- b c a ) Rotate third to top', 0
+    db 'over', 0, '( a b -- a b a ) Copy second to top', 0
+    db '@', 0, '( addr -- value ) Fetch from memory', 0
+    db '!', 0, '( value addr -- ) Store to memory', 0
+    db 'emit', 0, '( char -- ) Output character', 0
+    db 'cr', 0, '( -- ) Output newline', 0
+    db ':', 0, '( -- ) Begin word definition', 0
+    db ';', 0, '( -- ) End word definition', 0
+    db '~', 0, '( -- xt ) Get execution token of next word', 0
+    db '?', 0, '( addr -- ) Fetch and print', 0
+    db 'words', 0, '( -- str ) List all words', 0
+    db 'execute', 0, '( xt -- ) Execute token', 0
+    db 'len', 0, '( str -- n ) String length', 0
+    db 'type', 0, '( obj -- n ) Get type tag', 0
+    db 'array', 0, '( n -- arr ) Create array of size n', 0
+    db 'at', 0, '( arr i -- val ) Get array element', 0
+    db 'put', 0, '( val arr i -- ) Set array element', 0
+    db '[', 0, '( -- ) Begin array literal', 0
+    db ']', 0, '( -- arr ) End array literal', 0
+    db 'type-new', 0, '( -- tag ) Allocate new type tag', 0
+    db 'type-name', 0, '( str tag -- ) Name a type', 0
+    db 'type-set', 0, '( obj tag -- obj ) Set object type', 0
+    db 'type-name?', 0, '( tag -- str ) Get type name', 0
+    db 'if', 0, '( flag -- ) Conditional branch', 0
+    db 'then', 0, '( -- ) End conditional', 0
+    db 'else', 0, '( -- ) Alternative branch', 0
+    db 'begin', 0, '( -- ) Start loop', 0
+    db 'until', 0, '( flag -- ) Loop until true', 0
+    db 'while', 0, '( flag -- ) Loop while true', 0
+    db 'repeat', 0, '( -- ) End while loop', 0
+    db 'again', 0, '( -- ) Infinite loop back', 0
+    db 'key', 0, '( -- char ) Wait for keypress', 0
+    db 'key?', 0, '( -- flag ) Check if key available', 0
+    db 'disk-read', 0, '( sector -- addr ) Read disk sector', 0
+    db 'disk-write', 0, '( addr sector -- ) Write to disk', 0
+    db 'ed', 0, '( -- ) Mini text editor', 0
+    db 'save', 0, '( -- ) Save definitions to disk', 0
+    db 'restore', 0, '( -- ) Load definitions from disk', 0
+    db 'info', 0, '( "name" -- ) Show word info', 0
+    db 'remove', 0, '( "name" -- ) Remove user word', 0
+    db 'define', 0, '( "name" { body } -- ) Define new word', 0
+    db 'sort', 0, '( array -- array ) Sort array in place', 0
+    db 0  ; End of table
+
+; ============================================================
+; REMOVE - Remove a user-defined word
+; Stack: ( "name" -- )
+; Unlinks word from dictionary and removes from def_src_buffer
+; ============================================================
+word_remove:
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+    push rsi
+    push r8
+    push r9
+
+    ; Get name STRING from TOS
+    mov rax, r14
+    cmp qword [rax], TYPE_STRING
+    jne .remove_not_string
+
+    ; Get name pointer
+    lea rdi, [rax+16]           ; Name string data
+    ; Calculate name length
+    xor rcx, rcx
+.remove_namelen:
+    cmp byte [rdi+rcx], 0
+    je .remove_gotlen
+    inc rcx
+    jmp .remove_namelen
+.remove_gotlen:
+    ; RCX = name length, RDI = name string
+
+    ; Search dictionary for this word
+    mov rsi, [dict_latest]
+    test rsi, rsi
+    jz .remove_not_found
+
+    xor r8, r8                  ; R8 = previous entry (0 = head)
+.remove_search:
+    ; RSI points to current entry
+    mov r9, [rsi]               ; R9 = link to next entry
+
+    ; Check name length at offset 8
+    movzx rbx, byte [rsi+8]
+    cmp rbx, rcx
+    jne .remove_next
+
+    ; Compare names
+    push rdi
+    push rcx
+    lea rdx, [rsi+9]            ; Name in dict entry
+.remove_cmp:
+    mov al, [rdx]
+    mov bl, [rdi]
+    cmp al, bl
+    jne .remove_cmp_fail
+    inc rdx
+    inc rdi
+    dec rcx
+    jnz .remove_cmp
+
+    ; Found it!
+    pop rcx
+    pop rdi
+
+    ; Unlink: set previous->link = this->link
+    test r8, r8
+    jz .remove_is_head
+    ; R8 = previous entry, set its link to R9
+    mov [r8], r9
+    jmp .remove_unlinked
+
+.remove_is_head:
+    ; Removing head: dict_latest = this->link
+    mov [dict_latest], r9
+
+.remove_unlinked:
+    ; Now remove from def_src_buffer
+    ; Search for and remove the line
+    call remove_def_from_buffer
+
+    mov rax, str_removed
+    call print_string
+    call newline
+    jmp .remove_done
+
+.remove_cmp_fail:
+    pop rcx
+    pop rdi
+
+.remove_next:
+    mov r8, rsi                 ; Previous = current
+    mov rsi, r9                 ; Current = next
+    test rsi, rsi
+    jnz .remove_search
+
+.remove_not_found:
+    mov rax, str_remove_notfound
+    call print_string
+    call newline
+    jmp .remove_done
+
+.remove_not_string:
+    mov rax, str_remove_needstr
+    call print_string
+    call newline
+
+.remove_done:
+    ; Pop name from stack
+    sub r15, 8
+    mov r14, [r15]
+
+    pop r9
+    pop r8
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+str_removed: db 'Removed', 0
+str_remove_notfound: db 'Word not found', 0
+str_remove_needstr: db 'remove requires STRING', 0
+
+; ============================================================
+; SORT - Sort an array in place
+; Stack: ( array -- array )
+; Sorts numerically (integers) or alphabetically (strings)
+; ============================================================
+word_sort:
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+    push rsi
+    push r8
+    push r9
+    push r10
+    push r12
+    push r13
+
+    ; Get array from TOS (R14)
+    mov rax, r14
+    cmp qword [rax], TYPE_ARRAY
+    jne .sort_done              ; Not an array, just return
+
+    ; Get array count and data pointer
+    mov r8, [rax+8]             ; R8 = count
+    lea r9, [rax+16]            ; R9 = data start
+
+    ; Need at least 2 elements to sort
+    cmp r8, 2
+    jl .sort_done
+
+    ; Simple bubble sort for integers
+.sort_outer:
+    xor r10, r10                ; swapped = false
+    mov rcx, 1                  ; i = 1
+
+.sort_inner:
+    cmp rcx, r8
+    jge .sort_pass_done
+
+    ; Calculate offset for elements[i-1]
+    mov rax, rcx
+    dec rax
+    shl rax, 3                  ; rax = (i-1) * 8
+
+    ; Get elements
+    mov rsi, [r9 + rax]         ; elem1 = arr[i-1]
+    mov rdi, [r9 + rax + 8]     ; elem2 = arr[i]
+
+    ; Determine comparison type
+    ; Check if both are immediate integers
+    cmp rsi, 0x100000
+    jae .sort_obj_cmp
+    cmp rdi, 0x100000
+    jae .sort_obj_cmp
+
+    ; Both immediate integers - simple numeric compare
+    cmp rsi, rdi
+    jle .sort_no_swap
+    jmp .sort_do_swap
+
+.sort_obj_cmp:
+    ; At least one is an object - compare as strings if both STRING
+    cmp rsi, 0x100000
+    jb .sort_mixed              ; elem1 is int
+    cmp rdi, 0x100000
+    jb .sort_mixed              ; elem2 is int
+
+    ; Both objects - check if both strings
+    mov rbx, [rsi]              ; type1
+    cmp rbx, TYPE_STRING
+    jne .sort_by_addr
+    mov rbx, [rdi]              ; type2
+    cmp rbx, TYPE_STRING
+    jne .sort_by_addr
+
+    ; Both strings - compare alphabetically
+    push rcx
+    push rax
+    lea rsi, [rsi+16]           ; string1 data
+    mov rdi, [r9 + rax + 8]     ; reload elem2
+    lea rdi, [rdi+16]           ; string2 data
+
+.sort_str_loop:
+    mov al, [rsi]
+    mov bl, [rdi]
+    ; To lowercase
+    cmp al, 'A'
+    jb .s_no_low1
+    cmp al, 'Z'
+    ja .s_no_low1
+    add al, 32
+.s_no_low1:
+    cmp bl, 'A'
+    jb .s_no_low2
+    cmp bl, 'Z'
+    ja .s_no_low2
+    add bl, 32
+.s_no_low2:
+    cmp al, bl
+    jb .sort_str_less
+    ja .sort_str_greater
+    test al, al
+    jz .sort_str_equal
+    inc rsi
+    inc rdi
+    jmp .sort_str_loop
+
+.sort_str_less:
+    pop rax
+    pop rcx
+    jmp .sort_no_swap
+.sort_str_greater:
+    pop rax
+    pop rcx
+    jmp .sort_do_swap
+.sort_str_equal:
+    pop rax
+    pop rcx
+    jmp .sort_no_swap
+
+.sort_mixed:
+    ; Mixed types: integers sort before objects
+    cmp rsi, 0x100000
+    jb .sort_no_swap            ; int < obj, already correct
+    jmp .sort_do_swap           ; obj > int, swap
+
+.sort_by_addr:
+    ; Non-string objects: compare by address
+    cmp rsi, rdi
+    jle .sort_no_swap
+    jmp .sort_do_swap
+
+.sort_do_swap:
+    ; rax still has (i-1)*8 offset
+    mov rsi, [r9 + rax]
+    mov rdi, [r9 + rax + 8]
+    mov [r9 + rax], rdi
+    mov [r9 + rax + 8], rsi
+    mov r10, 1                  ; swapped = true
+
+.sort_no_swap:
+    inc rcx
+    jmp .sort_inner
+
+.sort_pass_done:
+    test r10, r10
+    jnz .sort_outer
+
+.sort_done:
+    ; TOS unchanged (array sorted in place)
+    pop r13
+    pop r12
+    pop r10
+    pop r9
+    pop r8
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; Helper: Remove definition line from def_src_buffer
+; Input: RDI = name pointer, RCX = name length
+remove_def_from_buffer:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+    push rsi
+    push r10
+    push r11
+
+    mov rsi, def_src_buffer
+.rdb_search:
+    cmp byte [rsi], 0
+    je .rdb_done
+
+    ; Mark line start
+    mov r10, rsi                ; R10 = line start
+
+    ; Skip whitespace
+.rdb_skipws:
+    cmp byte [rsi], ' '
+    jne .rdb_check
+    inc rsi
+    jmp .rdb_skipws
+
+.rdb_check:
+    ; Check for "name" format
+    cmp byte [rsi], '"'
+    jne .rdb_check_colon
+    inc rsi
+
+    push rdi
+    push rcx
+.rdb_cmp_quoted:
+    mov al, [rsi]
+    mov dl, [rdi]
+    cmp al, dl
+    jne .rdb_cmp_fail
+    inc rsi
+    inc rdi
+    dec rcx
+    jnz .rdb_cmp_quoted
+
+    cmp byte [rsi], '"'
+    jne .rdb_cmp_fail
+    pop rcx
+    pop rdi
+    jmp .rdb_found
+
+.rdb_check_colon:
+    cmp byte [rsi], ':'
+    jne .rdb_next_line
+    inc rsi
+    cmp byte [rsi], ' '
+    jne .rdb_next_line
+    inc rsi
+
+    push rdi
+    push rcx
+.rdb_cmp_colon:
+    mov al, [rsi]
+    mov dl, [rdi]
+    cmp al, dl
+    jne .rdb_cmp_fail
+    inc rsi
+    inc rdi
+    dec rcx
+    jnz .rdb_cmp_colon
+
+    cmp byte [rsi], ' '
+    je .rdb_found_pop
+    cmp byte [rsi], 0
+    je .rdb_found_pop
+    cmp byte [rsi], 10
+    je .rdb_found_pop
+
+.rdb_cmp_fail:
+    pop rcx
+    pop rdi
+
+.rdb_next_line:
+    mov rsi, r10                ; Back to line start
+.rdb_skip_line:
+    cmp byte [rsi], 0
+    je .rdb_done
+    cmp byte [rsi], 10
+    je .rdb_got_nl
+    inc rsi
+    jmp .rdb_skip_line
+.rdb_got_nl:
+    inc rsi
+    jmp .rdb_search
+
+.rdb_found_pop:
+    pop rcx
+    pop rdi
+
+.rdb_found:
+    ; Find end of line
+    mov rsi, r10
+.rdb_find_eol:
+    cmp byte [rsi], 0
+    je .rdb_at_end
+    cmp byte [rsi], 10
+    je .rdb_got_eol
+    inc rsi
+    jmp .rdb_find_eol
+
+.rdb_got_eol:
+    inc rsi                     ; Include newline in removal
+.rdb_at_end:
+    ; R10 = line start, RSI = after line
+    ; Shift rest of buffer down
+    mov rdi, r10
+.rdb_shift:
+    mov al, [rsi]
+    mov [rdi], al
+    cmp al, 0
+    je .rdb_shifted
+    inc rsi
+    inc rdi
+    jmp .rdb_shift
+
+.rdb_shifted:
+    ; Update def_src_ptr
+    mov rsi, def_src_buffer
+.rdb_find_end:
+    cmp byte [rsi], 0
+    je .rdb_set_ptr
+    inc rsi
+    jmp .rdb_find_end
+.rdb_set_ptr:
+    mov [def_src_ptr], rsi
+
+.rdb_done:
+    pop r11
+    pop r10
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+; ============================================================
 ; Direct disk I/O (register-based, no stack manipulation)
 ; ============================================================
 
@@ -5439,19 +6251,137 @@ ed_mode: db 0                   ; 0=normal, 1=insert
 ed_buffer: times 2000 db ' '    ; 80x25 text buffer
 
 word_words:
-    ; Push STRING listing all words
+    ; Push STRING listing all words (builtins + user-defined), sorted
+    push rbx
+    push rcx
+    push rdx
+    push rdi
     push rsi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+
+    ; Step 1: Collect all word pointers and lengths
+    xor r8, r8                  ; R8 = word count
+
+    ; Parse builtin words
     mov rsi, str_builtins
+.parse_builtins:
+    ; Skip spaces
+    cmp byte [rsi], ' '
+    jne .got_word_start
+    inc rsi
+    jmp .parse_builtins
+.got_word_start:
+    cmp byte [rsi], 0
+    je .builtins_parsed
+
+    ; Store pointer (word_ptrs uses qwords, index*8)
+    mov rax, r8
+    shl rax, 3                  ; *8 for qword
+    mov [word_ptrs + rax], rsi
+
+    ; Find word length
+    xor rcx, rcx
+.find_word_end:
+    cmp byte [rsi + rcx], ' '
+    je .found_end
+    cmp byte [rsi + rcx], 0
+    je .found_end
+    inc rcx
+    jmp .find_word_end
+.found_end:
+    ; Store length (word_lens uses bytes, just index)
+    mov [word_lens + r8], cl
+    add rsi, rcx                ; Move past word
+    inc r8                      ; word count++
+    jmp .parse_builtins
+
+.builtins_parsed:
+    ; Add user-defined words from dictionary
+    mov rsi, [dict_latest]
+.add_user_words:
+    test rsi, rsi
+    jz .all_words_collected
+
+    ; Store pointer to name (at offset 9)
+    mov rax, r8
+    shl rax, 3
+    lea rdx, [rsi+9]
+    mov [word_ptrs + rax], rdx
+
+    ; Store length (at offset 8) - word_lens uses bytes
+    movzx rcx, byte [rsi+8]
+    mov [word_lens + r8], cl
+
+    inc r8
+    mov rsi, [rsi]              ; Next entry
+    jmp .add_user_words
+
+.all_words_collected:
+    ; R8 = total word count
+    mov [word_count], r8
+
+.sort_done:
+    ; Step 3: Build output string from sorted words
+    mov rdi, words_buffer
+    mov r10, 0                  ; index
+.build_output:
+    cmp r10, [word_count]
+    jge .output_done
+
+    ; Add space between words (not before first)
+    test r10, r10
+    jz .no_space
+    mov al, ' '
+    stosb
+.no_space:
+
+    ; Copy word
+    mov rax, r10
+    shl rax, 3
+    mov rsi, [word_ptrs + rax]
+    movzx rcx, byte [word_lens + r10]
+.copy_word:
+    lodsb
+    stosb
+    dec rcx
+    jnz .copy_word
+
+    inc r10
+    jmp .build_output
+
+.output_done:
+    mov byte [rdi], 0           ; Null terminate
+
+    ; Create STRING from buffer
+    mov rsi, words_buffer
     call create_string_from_cstr
-    pop rsi
 
     ; Push to TOS
     mov [r15], r14
     add r15, 8
     mov r14, rax
+
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
     ret
 
-str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~word ? words execute len type array at put { } type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write ed ', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write ed save restore info remove define sort', 0
+words_buffer: times 2048 db 0   ; Buffer for word list
+word_ptrs: times 256 dq 0       ; Pointers to words (max 256 words)
+word_lens: times 256 db 0       ; Lengths of words
+word_count: dq 0                ; Number of words
 
 word_forget:
     ; Simplified FORGET - just removes latest word
@@ -5747,16 +6677,16 @@ interpret_line:
     cmp byte [rsi], 34          ; Double quote
     je .iline_handle_string
 
-    ; Check for bracket [name] - named variable access
-    cmp byte [rsi], '['
-    je .iline_handle_bracket
-
-    ; Check for array literal start {
+    ; Check for variable {name} - named variable access
     cmp byte [rsi], '{'
+    je .iline_handle_variable
+
+    ; Check for array literal start [
+    cmp byte [rsi], '['
     je .iline_handle_array_start
 
-    ; Check for array literal end }
-    cmp byte [rsi], '}'
+    ; Check for array literal end ]
+    cmp byte [rsi], ']'
     je .iline_handle_array_end
 
     ; Get word using parse_word
@@ -5856,6 +6786,10 @@ interpret_line:
     ; Parse the actual number value (RDI=word start, RCX=length still valid)
     call parse_number           ; Convert string to number in RAX
 
+    ; Check if in array mode - numbers go to collection buffer
+    cmp byte [array_mode], 1
+    je .iline_number_to_array
+
     ; Check if compiling
     cmp byte [compile_mode], 0
     jne .iline_compile_number
@@ -5864,6 +6798,16 @@ interpret_line:
     mov [r15], r14              ; Push old TOS
     add r15, 8
     mov r14, rax                ; New TOS
+    jmp .iline_parse_loop
+
+.iline_number_to_array:
+    ; Store number in collection buffer
+    push rbx
+    mov rbx, [array_collect_ptr]
+    mov [rbx], rax              ; Store number
+    add rbx, 8
+    mov [array_collect_ptr], rbx
+    pop rbx
     jmp .iline_parse_loop
 
 .iline_compile_number:
@@ -5904,14 +6848,14 @@ interpret_line:
     inc r13                     ; Skip )
     jmp .iline_parse_loop
 
-.iline_handle_bracket:
-    ; Handle [name] variable access
-    inc r13                     ; Skip [
+.iline_handle_variable:
+    ; Handle {name} variable access
+    inc r13                     ; Skip {
     mov rdi, r13
     xor rcx, rcx
 .iline_get_varname:
     mov al, [r13]
-    cmp al, ']'
+    cmp al, '}'
     je .iline_got_varname
     cmp al, 0
     je .iline_done
@@ -5920,7 +6864,7 @@ interpret_line:
     jmp .iline_get_varname
 
 .iline_got_varname:
-    inc r13                     ; Skip ]
+    inc r13                     ; Skip }
     ; RDI = name start, RCX = length
     call get_or_create_named_var  ; Returns address in RAX
 
@@ -6002,6 +6946,11 @@ interpret_line:
 .iline_str_done:
     mov byte [rdi], 0
     mov r13, rbx                ; Update position
+
+    ; Check if in array mode - strings go to collection buffer
+    cmp byte [array_mode], 1
+    je .iline_string_to_array
+
     ; Check compile mode
     cmp byte [compile_mode], 0
     jne .iline_compile_string
@@ -6010,6 +6959,17 @@ interpret_line:
     add r15, 8
     mov r14, rax
     jmp .iline_parse_loop
+
+.iline_string_to_array:
+    ; Store string in collection buffer
+    push rbx
+    mov rbx, [array_collect_ptr]
+    mov [rbx], rax              ; Store string object address
+    add rbx, 8
+    mov [array_collect_ptr], rbx
+    pop rbx
+    jmp .iline_parse_loop
+
 .iline_compile_string:
     ; Compile LIT + string address
     mov rbx, [compile_ptr]
@@ -6020,16 +6980,16 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_handle_array_start:
-    ; { - Start array collection using separate buffer
-    inc r13                     ; Skip {
+    ; [ - Start array collection using separate buffer
+    inc r13                     ; Skip [
     ; Initialize collection buffer
     mov qword [array_collect_ptr], array_collect_buffer
     mov byte [array_mode], 1    ; Enable auto-tick mode
     jmp .iline_parse_loop
 
 .iline_handle_array_end:
-    ; } - Create array from collection buffer
-    inc r13                     ; Skip }
+    ; ] - Create array from collection buffer
+    inc r13                     ; Skip ]
     mov byte [array_mode], 0    ; Disable auto-tick mode
 
     ; Calculate element count from collection buffer

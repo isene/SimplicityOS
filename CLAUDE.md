@@ -89,7 +89,7 @@ TYPE_USER_BASE = 4  (user-defined types start here)
 ```
 type-new                        ( -- 4 )
 "point" 4 type-name             ( )
-"point" { swap , , 4 type-set } define   ( x y -- point )
+"point" [ swap , , 4 type-set ] define   ( x y -- point )
 10 20 point .                   ( ) [point: 10 20 ]
 ```
 
@@ -118,10 +118,12 @@ KEYBOARD-READ   ( -- scancode )
 ## Development Workflow
 1. Write assembly in `kernel/`
 2. Build with `make`
-3. Test in QEMU: `make run`
+3. User tests in QEMU via `make run` in their terminal
 4. Verify functionality works
 5. Commit with clear message
 6. Push to GitHub
+
+**IMPORTANT: Do NOT start QEMU processes** - The user runs `make run` themselves in a separate terminal. Only build with `make`, never spawn QEMU.
 
 ## Testing Protocol
 - Every feature tested in QEMU before commit
