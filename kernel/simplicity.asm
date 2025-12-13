@@ -2461,6 +2461,58 @@ lookup_word:
 .try_key_right:
     ; key-right (9 chars)
     cmp rcx, 9
+    jne .try_key_delete
+    cmp byte [rdi], 'k'
+    jne .try_key_delete
+    cmp byte [rdi+1], 'e'
+    jne .try_key_delete
+    cmp byte [rdi+2], 'y'
+    jne .try_key_delete
+    cmp byte [rdi+3], '-'
+    jne .try_key_delete
+    cmp byte [rdi+4], 'r'
+    jne .try_key_delete
+    cmp byte [rdi+5], 'i'
+    jne .try_key_delete
+    cmp byte [rdi+6], 'g'
+    jne .try_key_delete
+    cmp byte [rdi+7], 'h'
+    jne .try_key_delete
+    cmp byte [rdi+8], 't'
+    jne .try_key_delete
+    mov rax, word_key_right
+    jmp .done
+
+.try_key_delete:
+    ; key-delete (10 chars)
+    cmp rcx, 10
+    jne .try_key_backspace
+    cmp byte [rdi], 'k'
+    jne .try_key_backspace
+    cmp byte [rdi+1], 'e'
+    jne .try_key_backspace
+    cmp byte [rdi+2], 'y'
+    jne .try_key_backspace
+    cmp byte [rdi+3], '-'
+    jne .try_key_backspace
+    cmp byte [rdi+4], 'd'
+    jne .try_key_backspace
+    cmp byte [rdi+5], 'e'
+    jne .try_key_backspace
+    cmp byte [rdi+6], 'l'
+    jne .try_key_backspace
+    cmp byte [rdi+7], 'e'
+    jne .try_key_backspace
+    cmp byte [rdi+8], 't'
+    jne .try_key_backspace
+    cmp byte [rdi+9], 'e'
+    jne .try_key_backspace
+    mov rax, word_key_delete
+    jmp .done
+
+.try_key_backspace:
+    ; key-backspace (13 chars)
+    cmp rcx, 13
     jne .try_neq
     cmp byte [rdi], 'k'
     jne .try_neq
@@ -2470,17 +2522,25 @@ lookup_word:
     jne .try_neq
     cmp byte [rdi+3], '-'
     jne .try_neq
-    cmp byte [rdi+4], 'r'
+    cmp byte [rdi+4], 'b'
     jne .try_neq
-    cmp byte [rdi+5], 'i'
+    cmp byte [rdi+5], 'a'
     jne .try_neq
-    cmp byte [rdi+6], 'g'
+    cmp byte [rdi+6], 'c'
     jne .try_neq
-    cmp byte [rdi+7], 'h'
+    cmp byte [rdi+7], 'k'
     jne .try_neq
-    cmp byte [rdi+8], 't'
+    cmp byte [rdi+8], 's'
     jne .try_neq
-    mov rax, word_key_right
+    cmp byte [rdi+9], 'p'
+    jne .try_neq
+    cmp byte [rdi+10], 'a'
+    jne .try_neq
+    cmp byte [rdi+11], 'c'
+    jne .try_neq
+    cmp byte [rdi+12], 'e'
+    jne .try_neq
+    mov rax, word_key_backspace
     jmp .done
 
 .try_neq:
@@ -4378,6 +4438,32 @@ word_key_right:
     ret
 .kr_first:
     mov r14, KEY_RIGHT
+    add r15, 8
+    ret
+
+word_key_delete:
+    ; KEY-DELETE - Push delete key constant ( -- 265 )
+    cmp r15, data_stack
+    je .kdel_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, KEY_DELETE
+    ret
+.kdel_first:
+    mov r14, KEY_DELETE
+    add r15, 8
+    ret
+
+word_key_backspace:
+    ; KEY-BACKSPACE - Push backspace constant ( -- 8 )
+    cmp r15, data_stack
+    je .kbs_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, 8
+    ret
+.kbs_first:
+    mov r14, 8
     add r15, 8
     ret
 
