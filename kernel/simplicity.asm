@@ -703,6 +703,7 @@ REPL:
     ; Load embedded apps (defines editor, invaders words)
     call load_apps
     mov qword [app_loading], 0  ; Done loading, enable def source saving
+    call word_clstk             ; Clear stack after loading apps
 
 .main_loop:
     ; Print prompt
@@ -1264,10 +1265,18 @@ create_string_from_cstr:
 ; Get or create named variable (RDI=name, RCX=length)
 ; Returns address of value slot in RAX
 get_or_create_named_var:
+    ; Input: RDI = name pointer, RCX = name length
+    ; Returns: RAX = address of value slot
     push rbx
     push rcx
+    push rdx
     push rdi
     push rsi
+    push r8
+    push r9
+
+    mov r8, rdi             ; R8 = name pointer
+    mov r9, rcx             ; R9 = name length
 
     ; Search existing variables
     mov rsi, named_vars
@@ -1284,16 +1293,36 @@ get_or_create_named_var:
     test rbx, rbx
     jz .not_found
 
-    ; Compare names (simplified - just compare first char for now)
-    ; TODO: Full string comparison
-    lea rbx, [rbx+16]       ; String data
-    mov r8b, [rbx]
-    mov r9b, [rdi]
-    cmp r8b, r9b
-    je .found               ; Found it (simplified match)
+    ; Compare lengths first
+    cmp r9, [rbx+8]         ; Compare with STRING length
+    jne .next_entry
 
+    ; Compare name bytes
+    push rsi
+    push rcx
+    lea rbx, [rbx+16]       ; String data
+    mov rdi, r8             ; Name to find
+    mov rcx, r9             ; Length
+.cmp_loop:
+    test rcx, rcx
+    jz .names_match
+    mov al, [rbx]
+    cmp al, [rdi]
+    jne .names_differ
+    inc rbx
+    inc rdi
+    dec rcx
+    jmp .cmp_loop
+.names_differ:
+    pop rcx
+    pop rsi
+.next_entry:
     add rsi, 16             ; Next entry
     jmp .search_loop
+.names_match:
+    pop rcx
+    pop rsi
+    jmp .found
 
 .not_found:
     ; Create new entry
@@ -1301,21 +1330,23 @@ get_or_create_named_var:
     shl rsi, 4
     add rsi, named_vars
 
-    ; Create name STRING
+    ; Create name STRING with known length
     push rsi
-    push rdi
-    push rcx
-    mov rax, rdi
-    push rax
-    mov rsi, rax
-    call create_string_from_cstr
-    pop rcx
-    pop rcx
-    pop rdi
-    pop rsi
+    mov rcx, r9             ; Length
+    add rcx, 17             ; Header (16) + null (1)
+    call allocate_object
+    mov qword [rax], TYPE_STRING
+    mov [rax+8], r9         ; Store length
 
-    ; Store name STRING
-    mov [rsi], rax
+    ; Copy name bytes
+    lea rdi, [rax+16]
+    mov rsi, r8             ; Source = name
+    mov rcx, r9             ; Length
+    rep movsb
+    mov byte [rdi], 0       ; Null terminate
+
+    pop rsi                 ; Restore slot pointer
+    mov [rsi], rax          ; Store STRING pointer
 
     ; Initialize value to 0
     mov qword [rsi+8], 0
@@ -1327,8 +1358,11 @@ get_or_create_named_var:
     ; Return address of value slot
     lea rax, [rsi+8]
 
+    pop r9
+    pop r8
     pop rsi
     pop rdi
+    pop rdx
     pop rcx
     pop rbx
     ret
@@ -1841,16 +1875,33 @@ lookup_word:
 
 .try_drop:
     cmp rcx, 4
-    jne .try_swap
+    jne .try_clstk
     cmp byte [rdi], 'd'
-    jne .try_swap
+    jne .try_clstk
     cmp byte [rdi+1], 'r'
-    jne .try_swap
+    jne .try_clstk
     cmp byte [rdi+2], 'o'
-    jne .try_swap
+    jne .try_clstk
     cmp byte [rdi+3], 'p'
-    jne .try_swap
+    jne .try_clstk
     mov rax, word_drop
+    jmp .done
+
+.try_clstk:
+    ; clstk (5 chars)
+    cmp rcx, 5
+    jne .try_swap
+    cmp byte [rdi], 'c'
+    jne .try_swap
+    cmp byte [rdi+1], 'l'
+    jne .try_swap
+    cmp byte [rdi+2], 's'
+    jne .try_swap
+    cmp byte [rdi+3], 't'
+    jne .try_swap
+    cmp byte [rdi+4], 'k'
+    jne .try_swap
+    mov rax, word_clstk
     jmp .done
 
 .try_swap:
@@ -2263,28 +2314,41 @@ lookup_word:
 .try_type_name_get:
     ; type-name? (10 chars)
     cmp rcx, 10
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi], 't'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+1], 'y'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+2], 'p'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+3], 'e'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+4], '-'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+5], 'n'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+6], 'a'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+7], 'm'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+8], 'e'
-    jne .try_key_check
+    jne .try_key
     cmp byte [rdi+9], '?'
-    jne .try_key_check
+    jne .try_key
     mov rax, word_type_name_get
+    jmp .done
+
+.try_key:
+    ; key (3 chars)
+    cmp rcx, 3
+    jne .try_key_check
+    cmp byte [rdi], 'k'
+    jne .try_key_check
+    cmp byte [rdi+1], 'e'
+    jne .try_key_check
+    cmp byte [rdi+2], 'y'
+    jne .try_key_check
+    mov rax, word_key
     jmp .done
 
 .try_key_check:
@@ -3260,14 +3324,17 @@ word_dot:
     jmp .dot_done
 
 .dot_done:
+    ; Print trailing space (standard Forth behavior)
+    mov al, ' '
+    call emit_char
     ; Pop: decrement depth, load new TOS from memory
-    ; Convention: depth = (R15 - data_stack) / 8
-    ; After pop: depth decreases by 1
+    ; Convention: R14=TOS, [R15-8]=second, R15=next free slot
+    ; After pop: depth decreases by 1, new TOS comes from stack
     sub r15, 8
     cmp r15, data_stack
     jle .dot_empty
     ; Still have items - load new TOS from memory
-    mov r14, [r15 - 8]      ; mem[depth-2] becomes new TOS
+    mov r14, [r15]          ; After sub, [r15] is old second item = new TOS
     ret
 
 .dot_empty:
@@ -3454,6 +3521,12 @@ word_drop:
     mov r14, [r15 - 8]
     ret
 .drop_empty:
+    mov r15, data_stack
+    xor r14, r14
+    ret
+
+word_clstk:
+    ; Clear entire stack ( ... -- )
     mov r15, data_stack
     xor r14, r14
     ret
@@ -4211,6 +4284,22 @@ word_screen_scroll:
     xor r14, r14
     ret
 
+word_key:
+    ; KEY - Wait for keypress ( -- char )
+    call wait_key
+
+    ; Push to TOS
+    cmp r15, data_stack
+    je .wk_first
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    ret
+.wk_first:
+    mov r14, rax
+    add r15, 8
+    ret
+
 word_key_check:
     ; KEY? - Check if key available, return key or 0 ( -- key|0 )
     call check_key
@@ -4218,7 +4307,7 @@ word_key_check:
     ; Push to TOS
     cmp r15, data_stack
     je .kc_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, rax
     ret
@@ -5145,6 +5234,7 @@ builtin_info_table:
     db '.s', 0, '( -- ) Print entire stack', 0
     db 'dup', 0, '( a -- a a ) Duplicate top', 0
     db 'drop', 0, '( a -- ) Discard top', 0
+    db 'clstk', 0, '( ... -- ) Clear entire stack', 0
     db 'swap', 0, '( a b -- b a ) Swap top two', 0
     db 'rot', 0, '( a b c -- b c a ) Rotate third to top', 0
     db 'over', 0, '( a b -- a b a ) Copy second to top', 0
@@ -6419,6 +6509,8 @@ words_buffer: times 2048 db 0   ; Buffer for word list
 word_ptrs: times 256 dq 0       ; Pointers to words (max 256 words)
 word_lens: times 256 db 0       ; Lengths of words
 word_count: dq 0                ; Number of words
+last_word_ptr: dq 0             ; Pointer to last parsed word (for error messages)
+last_word_len: dq 0             ; Length of last parsed word
 
 word_forget:
     ; Simplified FORGET - just removes latest word
@@ -6454,32 +6546,81 @@ word_define:
     mov rcx, [rax+8]            ; Element count
     lea rsi, [rax+16]           ; Array data
 
-    ; Copy array elements to compile_buffer, wrapping literals with LIT
-    ; Numbers need LIT prefix, word references are stored directly
-    mov rdi, compile_buffer
+    ; Process array elements into compile_buffer
+    ; - Literals (numbers, heap objects): wrap with LIT
+    ; - Immediate words (begin, until, if, then, else): execute to generate branches
+    ; - Other code references: store directly
+    mov qword [compile_ptr], compile_buffer
+    mov byte [compile_mode], 1  ; Enable compile mode for control flow words
+
 .define_copy_loop:
     test rcx, rcx
     jz .define_copy_done
     lodsq                       ; Get element into RAX
-    ; Check if literal: negative OR < 0x10000 (kernel starts at 0x10000)
+    push rcx
+    push rsi
+
+    ; Check if literal: negative OR < 0x10000 OR >= 0x200000 (heap)
     test rax, rax
     js .define_is_literal       ; Negative number
     cmp rax, 0x10000
     jb .define_is_literal       ; Small positive number
-    ; It's a reference - store directly
+    cmp rax, 0x200000
+    jae .define_is_literal      ; Heap object (string/float/array)
+
+    ; Check if variable address (in named_vars data section)
+    cmp rax, named_vars
+    jb .define_not_var
+    cmp rax, named_vars + 8192  ; named_vars is 1024 qwords = 8KB
+    jb .define_is_literal       ; Variable address - treat as literal
+.define_not_var:
+
+    ; It's a code reference - check if control flow immediate
+    cmp rax, word_begin
+    je .define_exec_immediate
+    cmp rax, word_until
+    je .define_exec_immediate
+    cmp rax, word_if
+    je .define_exec_immediate
+    cmp rax, word_then
+    je .define_exec_immediate
+    cmp rax, word_else
+    je .define_exec_immediate
+    cmp rax, word_while
+    je .define_exec_immediate
+    cmp rax, word_repeat
+    je .define_exec_immediate
+    cmp rax, word_again
+    je .define_exec_immediate
+
+    ; Regular code reference - store directly
+    mov rdi, [compile_ptr]
     mov [rdi], rax
     add rdi, 8
-    dec rcx
-    jmp .define_copy_loop
+    mov [compile_ptr], rdi
+    jmp .define_next_element
+
+.define_exec_immediate:
+    ; Execute the control flow word to generate branches
+    call rax
+    jmp .define_next_element
+
 .define_is_literal:
     ; Wrap with LIT
+    mov rdi, [compile_ptr]
     mov qword [rdi], LIT
     mov [rdi+8], rax
     add rdi, 16
+    mov [compile_ptr], rdi
+
+.define_next_element:
+    pop rsi
+    pop rcx
     dec rcx
     jmp .define_copy_loop
+
 .define_copy_done:
-    mov [compile_ptr], rdi
+    mov byte [compile_mode], 0  ; Disable compile mode
 
     ; Get name from [r15-8] (second on stack, array is TOS in R14)
     mov rax, [r15-8]
@@ -6671,7 +6812,7 @@ interpret_source:
     inc rdi
     inc r12
     inc rcx
-    cmp rcx, 79                 ; Max line length
+    cmp rcx, 1023               ; Max line length
     jl .copy_char
     jmp .end_line
 
@@ -6755,6 +6896,10 @@ interpret_line:
     test rcx, rcx
     jz .iline_parse_loop
 
+    ; Save word info for error reporting
+    mov [last_word_ptr], rdi    ; Save word start
+    mov [last_word_len], rcx    ; Save word length
+
     ; Check if getting name for definition
     cmp byte [compile_mode], 2
     je .iline_save_name
@@ -6769,6 +6914,11 @@ interpret_line:
     test rax, rax
     jz .iline_unknown
 
+    ; Check if in array mode FIRST - all words become references
+    ; This allows control flow words to be stored in arrays for later compilation
+    cmp byte [array_mode], 1
+    je .iline_push_ref_clean
+
     ; Check for immediate flag (bit 63 set by lookup_word)
     ; Immediate words are executed even during compilation
     bt rax, 63
@@ -6777,10 +6927,12 @@ interpret_line:
     btr rax, 63
     jmp .iline_exec_immediate
 
+.iline_push_ref_clean:
+    ; Clear immediate flag if set before storing
+    btr rax, 63
+    jmp .iline_push_ref
+
 .iline_not_immediate:
-    ; Check if in array mode (auto-tick)
-    cmp byte [array_mode], 1
-    je .iline_push_ref
 
     ; Execute or compile word
     cmp byte [compile_mode], 0
@@ -6795,11 +6947,13 @@ interpret_line:
 
 .iline_exec_immediate:
     ; Execute immediate/built-in word
+    push r13                    ; Save parse position
     call rax
+    pop r13                     ; Restore parse position
     jmp .iline_parse_loop
 
 .iline_push_ref:
-    ; Array mode - store to collection buffer, not data stack
+    ; Array mode - store reference to collection buffer
     push rbx
     mov rbx, [array_collect_ptr]
     mov [rbx], rax              ; Store reference
@@ -6892,7 +7046,23 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_unknown:
-    ; Unknown word - set error flag
+    ; Unknown word - print it and set error flag
+    ; Print the unknown word from saved info
+    mov al, ' '
+    call emit_char
+    mov rdi, [last_word_ptr]
+    mov rcx, [last_word_len]
+.iline_print_unknown_word:
+    test rcx, rcx
+    jz .iline_print_unknown_done
+    mov al, [rdi]
+    call emit_char
+    inc rdi
+    dec rcx
+    jmp .iline_print_unknown_word
+.iline_print_unknown_done:
+    mov al, '?'
+    call emit_char
     mov r12, 0                  ; Error!
     jmp .iline_parse_loop
 
@@ -6927,6 +7097,10 @@ interpret_line:
     ; RDI = name start, RCX = length
     call get_or_create_named_var  ; Returns address in RAX
 
+    ; Check if in array mode - store address in array buffer
+    cmp byte [array_mode], 1
+    je .iline_var_to_array
+
     ; Check if compiling
     cmp byte [compile_mode], 0
     jne .iline_compile_var
@@ -6935,6 +7109,16 @@ interpret_line:
     mov [r15], r14
     add r15, 8
     mov r14, rax
+    jmp .iline_parse_loop
+
+.iline_var_to_array:
+    ; Store variable address in array collection buffer
+    push rbx
+    mov rbx, [array_collect_ptr]
+    mov [rbx], rax
+    add rbx, 8
+    mov [array_collect_ptr], rbx
+    pop rbx
     jmp .iline_parse_loop
 
 .iline_compile_var:
@@ -7013,7 +7197,7 @@ interpret_line:
     ; Check compile mode
     cmp byte [compile_mode], 0
     jne .iline_compile_string
-    ; Push to stack
+    ; Push to stack (interpret mode)
     mov [r15], r14
     add r15, 8
     mov r14, rax
@@ -7039,11 +7223,11 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_handle_array_start:
-    ; [ - Start array collection using separate buffer
+    ; [ - Start array collection (data mode, no control flow)
     inc r13                     ; Skip [
     ; Initialize collection buffer
     mov qword [array_collect_ptr], array_collect_buffer
-    mov byte [array_mode], 1    ; Enable auto-tick mode
+    mov byte [array_mode], 1    ; Enable auto-tick mode (refs, not execution)
     jmp .iline_parse_loop
 
 .iline_handle_array_end:
@@ -7080,7 +7264,7 @@ interpret_line:
 .copy_done:
     pop rcx
 
-    ; Push array to data stack (normal push - preserves items before {)
+    ; Push array to data stack
     mov [r15], r14
     add r15, 8
     mov r14, rax
@@ -7123,10 +7307,11 @@ exec_definition:
     ; Check for ZBRANCH
     cmp rax, ZBRANCH
     jne .exec_not_zbranch
-    lodsq                       ; Get offset
-    test r14, r14               ; Check TOS
+    lodsq                       ; Get offset into RAX
+    mov rbx, r14                ; Save TOS for test
     sub r15, 8
     mov r14, [r15]              ; Pop new TOS
+    test rbx, rbx               ; Test saved TOS (after pop to preserve flags)
     jnz .exec_def_loop          ; If not zero, don't branch
     add rsi, rax                ; Branch
     jmp .exec_def_loop
@@ -7134,10 +7319,10 @@ exec_definition:
 .exec_not_zbranch:
     ; Check if nested dictionary word
     cmp rax, dictionary_space
-    jl .exec_is_builtin
-    mov r13, [dict_here]
-    cmp rax, r13
-    jge .exec_is_builtin
+    jb .exec_is_builtin         ; Use unsigned comparison for addresses
+    mov rcx, [dict_here]
+    cmp rax, rcx
+    jae .exec_is_builtin        ; Use unsigned comparison for addresses
     mov rbx, [rax]
     cmp rbx, DOCOL
     jne .exec_is_builtin
@@ -7224,10 +7409,10 @@ load_apps:
     push r12
     push r13
 
-    ; Load editor
-    mov rsi, serial_loading_editor
+    ; Load hello
+    mov rsi, serial_loading_hello
     call serial_print
-    mov rsi, app_name_editor
+    mov rsi, app_name_hello
     call load_app_by_cstring
 
     ; Load invaders
@@ -7236,16 +7421,16 @@ load_apps:
     mov rsi, app_name_invaders
     call load_app_by_cstring
 
-    ; Load hello
-    mov rsi, serial_loading_hello
-    call serial_print
-    mov rsi, app_name_hello
-    call load_app_by_cstring
-
     ; Load test
     mov rsi, serial_loading_test
     call serial_print
     mov rsi, app_name_test
+    call load_app_by_cstring
+
+    ; Load editor
+    mov rsi, serial_loading_editor
+    call serial_print
+    mov rsi, app_name_editor
     call load_app_by_cstring
 
     ; Done
@@ -7435,7 +7620,7 @@ str_ok: db ' ok', 0
 str_goodbye: db 'Goodbye!', 0
 str_unknown: db ' ?', 0
 
-input_buffer: times 80 db 0
+input_buffer: times 1024 db 0
 history_buffer: times 10*80 db 0    ; 10 lines of history
 history_count: dq 0                  ; Number of lines in history
 history_index: dq 0                  ; Current position in history
@@ -7453,7 +7638,7 @@ app_active: dq 0                ; 1 if inside app context, 0 otherwise
 app_loading: dq 1               ; 1 during boot app loading, 0 after (starts at 1)
 array_mode: db 0                ; 1 if inside array literal, 0 otherwise
 compile_mode: db 0              ; 0 = interpret, 1 = compile
-array_collect_buffer: times 64 dq 0  ; Temporary buffer for array collection
+array_collect_buffer: times 512 dq 0  ; Temporary buffer for array collection (512 elements max)
 array_collect_ptr: dq 0         ; Pointer into collection buffer
 dict_here: dq dictionary_space  ; Next free space in dictionary
 dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)

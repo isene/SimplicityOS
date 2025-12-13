@@ -1,4 +1,1 @@
-\ test.forth - Absolute simplest test
-\ Just emit characters, no loops, no strings
-
-: test 72 emit 73 emit 10 emit ;
+"loop1" [ 5 begin dup . cr 1 - dup 0 = until drop ] define

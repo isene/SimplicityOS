@@ -171,3 +171,4 @@ KEYBOARD-READ   ( -- scancode )
 - Working code beats perfect design
 - Test before commit, always
 - Document as you build, not after
+- Do not run up QEMU for me - I will test it in a terminal myself using make run
