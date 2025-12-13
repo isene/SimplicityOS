@@ -1300,6 +1300,9 @@ get_or_create_named_var:
     ; Compare name bytes
     push rsi
     push rcx
+    push r8                 ; Save search name ptr
+    push r9                 ; Save length
+
     lea rbx, [rbx+16]       ; String data
     mov rdi, r8             ; Name to find
     mov rcx, r9             ; Length
@@ -1314,12 +1317,16 @@ get_or_create_named_var:
     dec rcx
     jmp .cmp_loop
 .names_differ:
+    pop r9
+    pop r8
     pop rcx
     pop rsi
 .next_entry:
     add rsi, 16             ; Next entry
     jmp .search_loop
 .names_match:
+    pop r9
+    pop r8
     pop rcx
     pop rsi
     jmp .found
@@ -1890,18 +1897,56 @@ lookup_word:
 .try_clstk:
     ; clstk (5 chars)
     cmp rcx, 5
-    jne .try_swap
+    jne .try_varcount
     cmp byte [rdi], 'c'
-    jne .try_swap
+    jne .try_varcount
     cmp byte [rdi+1], 'l'
-    jne .try_swap
+    jne .try_varcount
     cmp byte [rdi+2], 's'
-    jne .try_swap
+    jne .try_varcount
     cmp byte [rdi+3], 't'
-    jne .try_swap
+    jne .try_varcount
     cmp byte [rdi+4], 'k'
-    jne .try_swap
+    jne .try_varcount
     mov rax, word_clstk
+    jmp .done
+
+.try_varcount:
+    ; varcount (8 chars)
+    cmp rcx, 8
+    jne .try_vars
+    cmp byte [rdi], 'v'
+    jne .try_vars
+    cmp byte [rdi+1], 'a'
+    jne .try_vars
+    cmp byte [rdi+2], 'r'
+    jne .try_vars
+    cmp byte [rdi+3], 'c'
+    jne .try_vars
+    cmp byte [rdi+4], 'o'
+    jne .try_vars
+    cmp byte [rdi+5], 'u'
+    jne .try_vars
+    cmp byte [rdi+6], 'n'
+    jne .try_vars
+    cmp byte [rdi+7], 't'
+    jne .try_vars
+    mov rax, word_varcount
+    jmp .done
+
+.try_vars:
+    ; vars (4 chars)
+    cmp rcx, 4
+    jne .try_swap
+    cmp byte [rdi], 'v'
+    jne .try_swap
+    cmp byte [rdi+1], 'a'
+    jne .try_swap
+    cmp byte [rdi+2], 'r'
+    jne .try_swap
+    cmp byte [rdi+3], 's'
+    jne .try_swap
+    mov rax, word_vars
     jmp .done
 
 .try_swap:
@@ -3589,6 +3634,87 @@ word_clstk:
     ; Clear entire stack ( ... -- )
     mov r15, data_stack
     xor r14, r14
+    ret
+
+word_varcount:
+    ; Push named variable count ( -- n )
+    cmp r15, data_stack
+    je .vc_first
+    mov [r15-8], r14
+    add r15, 8
+    mov r14, [named_var_count]
+    ret
+.vc_first:
+    mov r14, [named_var_count]
+    add r15, 8
+    ret
+
+word_vars:
+    ; Dump all named variables ( -- )
+    push rbx
+    push rcx
+    push rsi
+    push rdi
+
+    mov rsi, named_vars
+    mov rcx, [named_var_count]
+    test rcx, rcx
+    jz .vars_done
+
+.vars_loop:
+    push rcx
+    push rsi
+
+    ; Print variable number
+    mov rax, [named_var_count]
+    sub rax, rcx
+    inc rax
+    call print_number
+    mov al, ':'
+    call emit_char
+    mov al, ' '
+    call emit_char
+
+    ; Get STRING pointer
+    pop rsi
+    push rsi
+    mov rbx, [rsi]
+    test rbx, rbx
+    jz .vars_next
+
+    ; Print name (STRING at rbx)
+    lea rdi, [rbx+16]
+    mov rcx, [rbx+8]
+.vars_print_char:
+    test rcx, rcx
+    jz .vars_print_val
+    mov al, [rdi]
+    call emit_char
+    inc rdi
+    dec rcx
+    jmp .vars_print_char
+
+.vars_print_val:
+    mov al, '='
+    call emit_char
+    pop rsi
+    push rsi
+    mov rax, [rsi+8]        ; Value
+    call print_number
+    call newline
+
+.vars_next:
+    pop rsi
+    pop rcx
+    add rsi, 16
+    dec rcx
+    jnz .vars_loop
+
+.vars_done:
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rbx
     ret
 
 word_swap:
@@ -7507,16 +7633,16 @@ load_apps:
     mov rsi, app_name_invaders
     call load_app_by_cstring
 
+    ; Load editor (before test, since test uses editor words)
+    mov rsi, serial_loading_editor
+    call serial_print
+    mov rsi, app_name_editor
+    call load_app_by_cstring
+
     ; Load test
     mov rsi, serial_loading_test
     call serial_print
     mov rsi, app_name_test
-    call load_app_by_cstring
-
-    ; Load editor
-    mov rsi, serial_loading_editor
-    call serial_print
-    mov rsi, app_name_editor
     call load_app_by_cstring
 
     ; Done

@@ -1,8 +1,7 @@
 "loop1" [ 5 begin dup . cr 1 - dup 0 = until drop ] define
-"show-y" [ {editor-y} @ . ] define
-"test-lt" [ 0 22 < . ] define
-"test-if1" [ 1 if 42 . else 99 . then ] define
-"inc-y" [ {editor-y} @ 1 + {editor-y} ! ] define
-"test-inc" [ {editor-y} @ . inc-y {editor-y} @ . ] define
-"down2" [ {editor-y} @ 22 < if {editor-y} @ 1 + {editor-y} ! then ] define
-"test-d2" [ {editor-y} @ . down2 {editor-y} @ . ] define
+"show-xy" [ {editor-x} @ . {editor-y} @ . ] define
+"right2" [ {editor-x} @ 78 < if {editor-x} @ 1 + {editor-x} ! then ] define
+"test-right2" [ show-xy right2 show-xy ] define
+"test-right" [ show-xy editor-right show-xy ] define
+"set-x-5" [ 5 {editor-x} ! ] define
+"test-shared" [ show-xy set-x-5 editor-right show-xy ] define
