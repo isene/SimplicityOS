@@ -1,3 +1,4 @@
+"showkey" [ begin key dup . cr dup 113 = until drop ] define
 "loop1" [ 5 begin dup . cr 1 - dup 0 = until drop ] define
 "show-xy" [ {editor-x} @ . {editor-y} @ . ] define
 "right2" [ {editor-x} @ 78 < if {editor-x} @ 1 + {editor-x} ! then ] define
