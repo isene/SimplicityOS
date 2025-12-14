@@ -5085,6 +5085,8 @@ word_disk_read:
     mov rax, [r15]          ; sector
     mov r14, [r15-8]        ; new TOS (or garbage if stack empty)
 
+    mov ecx, eax            ; Save sector BEFORE wait loop corrupts AL
+
     ; Wait for drive ready
     mov dx, IDE_STATUS
 .dr_wait_ready:
@@ -5098,7 +5100,7 @@ word_disk_read:
     out dx, al
 
     mov dx, IDE_LBA_LOW
-    mov ecx, eax            ; Save sector number
+    mov eax, ecx            ; Restore sector number
     out dx, al              ; LBA bits 0-7
 
     mov dx, IDE_LBA_MID
@@ -5170,14 +5172,14 @@ word_disk_write:
     mov rsi, [r15]          ; addr
     mov r14, [r15-8]        ; new TOS (or garbage if stack empty)
 
+    mov ecx, eax            ; Save sector BEFORE wait loop corrupts AL
+
     ; Wait for drive ready
     mov dx, IDE_STATUS
 .dw_wait_ready:
     in al, dx
     test al, 0x80           ; BSY bit
     jnz .dw_wait_ready
-
-    mov ecx, eax            ; Save sector number
 
     ; Set up LBA addressing
     mov dx, IDE_SECTOR_CNT
