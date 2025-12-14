@@ -3061,14 +3061,27 @@ lookup_word:
     cmp rcx, 4
     jne .try_save
     cmp byte [rdi], 'l'
-    jne .try_save
+    jne .try_edit
     cmp byte [rdi+1], 'o'
-    jne .try_save
+    jne .try_edit
     cmp byte [rdi+2], 'a'
-    jne .try_save
+    jne .try_edit
     cmp byte [rdi+3], 'd'
-    jne .try_save
+    jne .try_edit
     mov rax, word_load
+    jmp .done
+
+.try_edit:
+    ; edit (4 chars) - shortcut to load editor
+    cmp byte [rdi], 'e'
+    jne .try_save
+    cmp byte [rdi+1], 'd'
+    jne .try_save
+    cmp byte [rdi+2], 'i'
+    jne .try_save
+    cmp byte [rdi+3], 't'
+    jne .try_save
+    mov rax, word_edit
     jmp .done
 
 .try_save:
@@ -6455,6 +6468,19 @@ str_loading_app: db 'Loading app: ', 0
 str_sector200_debug: db 'Sector200: ', 0
 str_load_error: db 'Error: expected string', 13, 10, 0
 
+; edit - shortcut to load editor app
+word_edit:
+    ; Create "editor" string and call load
+    push rsi
+    mov rsi, str_editor_name
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax            ; Put string on stack
+    add r15, 8
+    jmp word_load           ; Tail call to load
+
+str_editor_name: db 'editor', 0
+
 word_words:
     ; Push STRING listing all words (builtins + user-defined), sorted
     push rbx
@@ -6582,7 +6608,7 @@ word_words:
     pop rbx
     ret
 
-str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write save restore info remove define sort allot', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write save restore info remove define sort allot load edit', 0
 words_buffer: times 2048 db 0   ; Buffer for word list
 word_ptrs: times 256 dq 0       ; Pointers to words (max 256 words)
 word_lens: times 256 db 0       ; Lengths of words
@@ -6874,8 +6900,8 @@ interpret_source:
     mov r12, rsi                ; Save source pointer
 
 .next_line:
-    ; Copy line to input_buffer
-    mov rdi, input_buffer
+    ; Copy line to app_input_buffer (separate from REPL's input_buffer)
+    mov rdi, app_input_buffer
     xor rcx, rcx                ; Line length
 
 .copy_char:
@@ -6909,7 +6935,7 @@ interpret_source:
     jz .check_more
 
     ; Process the line
-    mov rsi, input_buffer
+    mov rsi, app_input_buffer
     call interpret_line
 
 .check_more:
@@ -7699,6 +7725,7 @@ str_goodbye: db 'Goodbye!', 0
 str_unknown: db ' ?', 0
 
 input_buffer: times 1024 db 0
+app_input_buffer: times 1024 db 0   ; Separate buffer for app loading (avoids nested buffer corruption)
 history_buffer: times 10*80 db 0    ; 10 lines of history
 history_count: dq 0                  ; Number of lines in history
 history_index: dq 0                  ; Current position in history
