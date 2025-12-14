@@ -6496,6 +6496,12 @@ word_ed:
     mov al, ' '
     rep stosb
 
+    ; Clear line lengths
+    mov rdi, ed_line_lens
+    mov rcx, 24
+    xor al, al
+    rep stosb
+
     ; Clear screen (black background)
     mov rdi, 0xB8000
     mov rcx, 2000
@@ -6555,6 +6561,16 @@ word_ed:
     cmp al, 10
     je .newline
 
+    ; Arrow keys in insert mode
+    cmp rax, KEY_LEFT
+    je .move_left
+    cmp rax, KEY_RIGHT
+    je .move_right
+    cmp rax, KEY_UP
+    je .move_up
+    cmp rax, KEY_DOWN
+    je .move_down
+
     ; Printable character - insert it
     cmp al, 32
     jl .main_loop               ; Ignore control chars
@@ -6575,14 +6591,35 @@ word_ed:
 
 .move_left:
     cmp qword [ed_cursor_x], 0
-    je .main_loop
+    jne .left_same_line
+    ; At start of line - wrap to end of previous line
+    cmp qword [ed_cursor_y], 0
+    je .main_loop           ; Can't go before first line
+    dec qword [ed_cursor_y]
+    mov rbx, [ed_cursor_y]
+    movzx eax, byte [ed_line_lens + rbx]
+    mov [ed_cursor_x], rax
+    call ed_update_cursor
+    jmp .main_loop
+.left_same_line:
     dec qword [ed_cursor_x]
     call ed_update_cursor
     jmp .main_loop
 
 .move_right:
-    cmp qword [ed_cursor_x], 79
-    jge .main_loop
+    ; Get current line length
+    mov rbx, [ed_cursor_y]
+    movzx eax, byte [ed_line_lens + rbx]
+    cmp [ed_cursor_x], rax
+    jl .right_same_line
+    ; At or past end of line content - wrap to next line
+    cmp qword [ed_cursor_y], 23
+    jge .main_loop          ; Can't go past last line
+    mov qword [ed_cursor_x], 0
+    inc qword [ed_cursor_y]
+    call ed_update_cursor
+    jmp .main_loop
+.right_same_line:
     inc qword [ed_cursor_x]
     call ed_update_cursor
     jmp .main_loop
@@ -6591,6 +6628,13 @@ word_ed:
     cmp qword [ed_cursor_y], 0
     je .main_loop
     dec qword [ed_cursor_y]
+    ; Clamp x to new line length
+    mov rbx, [ed_cursor_y]
+    movzx eax, byte [ed_line_lens + rbx]
+    cmp [ed_cursor_x], rax
+    jle .up_ok
+    mov [ed_cursor_x], rax
+.up_ok:
     call ed_update_cursor
     jmp .main_loop
 
@@ -6598,6 +6642,13 @@ word_ed:
     cmp qword [ed_cursor_y], 23
     jge .main_loop
     inc qword [ed_cursor_y]
+    ; Clamp x to new line length
+    mov rbx, [ed_cursor_y]
+    movzx eax, byte [ed_line_lens + rbx]
+    cmp [ed_cursor_x], rax
+    jle .down_ok
+    mov [ed_cursor_x], rax
+.down_ok:
     call ed_update_cursor
     jmp .main_loop
 
@@ -6605,8 +6656,9 @@ word_ed:
     cmp qword [ed_cursor_x], 0
     je .main_loop
     dec qword [ed_cursor_x]
-    mov al, ' '
-    call ed_put_char_no_advance
+    ; Shift buffer content left from cursor+1 to end of line
+    call ed_shift_left
+    call ed_redraw_line
     call ed_update_cursor
     jmp .main_loop
 
@@ -6633,41 +6685,151 @@ word_ed:
     call update_hw_cursor
     ret
 
-; Put character at cursor, advance cursor
+; Put character at cursor with true insert (shift text right)
 ed_put_char:
     push rax
     push rbx
+    push rcx
+    push rdx
+    push rdi
+    push rsi
 
-    ; Calculate screen position
+    mov dl, al              ; Save char to insert
+
+    ; Get line length
     mov rbx, [ed_cursor_y]
-    imul rbx, 80
-    add rbx, [ed_cursor_x]
-    shl rbx, 1
-    add rbx, 0xB8000
+    movzx eax, byte [ed_line_lens + rbx]
 
-    ; Write char
-    mov [rbx], al
-    mov byte [rbx+1], 0x07      ; White on black
+    ; Check if line is full
+    cmp al, 79
+    jge .done_insert        ; Line full, can't insert
 
-    ; Also store in buffer
-    mov rbx, [ed_cursor_y]
-    imul rbx, 80
-    add rbx, [ed_cursor_x]
-    add rbx, ed_buffer
-    mov [rbx], al
+    ; Shift buffer content right from cursor to end of line
+    ; Start from end, work backwards to cursor
+    mov rdi, [ed_cursor_y]
+    imul rdi, 80
+    add rdi, ed_buffer      ; rdi = start of line in buffer
 
-    ; Advance cursor
+    movzx ecx, byte [ed_line_lens + rbx]  ; line length
+    mov rsi, rcx            ; rsi = current position (end of content)
+
+.shift_loop:
+    cmp rsi, [ed_cursor_x]
+    jle .shift_done
+
+    ; Move char at rsi-1 to rsi
+    mov al, [rdi + rsi - 1]
+    mov [rdi + rsi], al
+    dec rsi
+    jmp .shift_loop
+
+.shift_done:
+    ; Insert new character at cursor
+    mov rax, [ed_cursor_x]
+    mov [rdi + rax], dl
+
+    ; Increment line length
+    inc byte [ed_line_lens + rbx]
+
+    ; Redraw the line on screen
+    call ed_redraw_line
+
+    ; Advance cursor (but don't go past line length)
     inc qword [ed_cursor_x]
-    cmp qword [ed_cursor_x], 80
-    jl .no_wrap
-    mov qword [ed_cursor_x], 0
-    inc qword [ed_cursor_y]
-    cmp qword [ed_cursor_y], 24
-    jl .no_wrap
-    mov qword [ed_cursor_y], 23
-.no_wrap:
+    movzx eax, byte [ed_line_lens + rbx]
+    cmp [ed_cursor_x], rax
+    jle .cursor_ok
+    mov rax, [ed_cursor_y]
+    movzx eax, byte [ed_line_lens + rax]
+    mov [ed_cursor_x], rax
+.cursor_ok:
     call ed_update_cursor
 
+.done_insert:
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+; Redraw current line from buffer to screen
+ed_redraw_line:
+    push rax
+    push rbx
+    push rcx
+    push rdi
+
+    ; Calculate screen address for start of line
+    mov rdi, [ed_cursor_y]
+    imul rdi, 160           ; 80 chars * 2 bytes
+    add rdi, 0xB8000
+
+    ; Get buffer address for line
+    mov rbx, [ed_cursor_y]
+    imul rbx, 80
+    add rbx, ed_buffer
+
+    ; Draw 80 characters
+    mov rcx, 80
+.redraw_loop:
+    mov al, [rbx]
+    mov [rdi], al
+    mov byte [rdi+1], 0x07  ; White on black
+    inc rbx
+    add rdi, 2
+    dec rcx
+    jnz .redraw_loop
+
+    pop rdi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+; Shift line content left from cursor position (delete char at cursor)
+ed_shift_left:
+    push rax
+    push rbx
+    push rcx
+    push rdi
+    push rsi
+
+    ; Get line length
+    mov rbx, [ed_cursor_y]
+    movzx ecx, byte [ed_line_lens + rbx]
+    test ecx, ecx
+    jz .shift_left_done     ; Empty line, nothing to shift
+
+    ; Get buffer address for line
+    mov rdi, [ed_cursor_y]
+    imul rdi, 80
+    add rdi, ed_buffer
+
+    ; Shift from cursor+1 to end of line, left by 1
+    mov rsi, [ed_cursor_x]
+.shift_left_loop:
+    cmp rsi, rcx
+    jge .shift_left_clear_end
+
+    ; Move char at rsi+1 to rsi
+    mov al, [rdi + rsi + 1]
+    mov [rdi + rsi], al
+    inc rsi
+    jmp .shift_left_loop
+
+.shift_left_clear_end:
+    ; Clear last char position
+    mov byte [rdi + rcx - 1], ' '
+
+    ; Decrement line length
+    dec byte [ed_line_lens + rbx]
+
+.shift_left_done:
+    pop rsi
+    pop rdi
+    pop rcx
     pop rbx
     pop rax
     ret
@@ -6770,6 +6932,7 @@ ed_cursor_x: dq 0
 ed_cursor_y: dq 0
 ed_mode: db 0                   ; 0=normal, 1=insert
 ed_buffer: times 2000 db ' '    ; 80x25 text buffer
+ed_line_lens: times 24 db 0     ; Line lengths (0-80 chars per line)
 
 word_words:
     ; Push STRING listing all words (builtins + user-defined), sorted
