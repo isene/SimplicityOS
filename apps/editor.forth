@@ -55,14 +55,41 @@
   20 redraw-line 21 redraw-line 22 redraw-line 23 redraw-line
 ] define
 
+"clear-status" [
+  0 begin dup 80 < while 32 black-on-white over 24 screen-char 1 + repeat drop
+] define
+
 "draw-mode" [ {editor-mode} @ if 73 else 78 then black-on-white 1 24 screen-char ] define
 
-"status-line" [ 32 black-on-white 0 24 screen-char draw-mode move-cursor ] define
+"draw-file-num" [
+  {file-num} @ 48 + black-on-white 10 24 screen-char
+] define
+
+"status-line" [
+  clear-status
+  45 black-on-white 0 24 screen-char
+  draw-mode
+  45 black-on-white 2 24 screen-char
+  70 black-on-white 8 24 screen-char
+  58 black-on-white 9 24 screen-char
+  draw-file-num
+  move-cursor
+] define
 
 "clear-editor" [ white-on-black screen-clear 0 {editor-x} ! 0 {editor-y} ! init-buffer ] define
 
 "editor-left" [ {editor-x} @ 0 > if {editor-x} @ 1 - {editor-x} ! then status-line ] define
-"editor-right" [ {editor-x} @ 79 < if {editor-x} @ 1 + {editor-x} ! then status-line ] define
+"editor-right" [
+  {editor-x} @ 79 < if
+    {editor-x} @ 1 + {editor-x} !
+  else
+    {editor-y} @ 23 < if
+      0 {editor-x} !
+      {editor-y} @ 1 + {editor-y} !
+    then
+  then
+  status-line
+] define
 "editor-up" [ {editor-y} @ 0 > if {editor-y} @ 1 - {editor-y} ! then status-line ] define
 "editor-down" [ {editor-y} @ 23 < if {editor-y} @ 1 + {editor-y} ! then status-line ] define
 
@@ -73,25 +100,43 @@
   status-line
 ] define
 
+"editor-enter" [
+  {editor-y} @ 23 < if
+    0 {editor-x} !
+    {editor-y} @ 1 + {editor-y} !
+  then
+  status-line
+] define
+
 "enter-insert" [ 1 {editor-mode} ! status-line ] define
 "exit-insert" [ 0 {editor-mode} ! status-line ] define
 
 "handle-insert" [
   dup key-escape = if drop exit-insert
+  else dup 96 = if drop exit-insert
+  else dup 10 = if drop editor-enter
   else dup key-left = if drop editor-left
   else dup key-right = if drop editor-right
   else dup key-up = if drop editor-up
   else dup key-down = if drop editor-down
   else dup 32 >= over 126 <= and if insert-char
   else drop
-  then then then then then then
+  then then then then then then then then
 ] define
+
+"file-next" [ {file-num} @ 9 < if {file-num} @ 1 + {file-num} ! then status-line ] define
+"file-prev" [ {file-num} @ 0 > if {file-num} @ 1 - {file-num} ! then status-line ] define
+
+"do-save" [ save-file 83 black-on-white 15 24 screen-char move-cursor ] define
+"do-load" [ load-file redraw-all 76 black-on-white 15 24 screen-char move-cursor ] define
 
 "handle-normal" [
   dup 113 = if drop 0
   else dup 105 = if drop enter-insert 1
-  else dup 115 = if drop save-file status-line 1
-  else dup 111 = if drop load-file status-line 1
+  else dup 115 = if drop do-save 1
+  else dup 111 = if drop do-load 1
+  else dup 43 = if drop file-next 1
+  else dup 45 = if drop file-prev 1
   else dup 104 = if drop editor-left 1
   else dup 108 = if drop editor-right 1
   else dup 106 = if drop editor-down 1
@@ -101,7 +146,7 @@
   else dup key-up = if drop editor-up 1
   else dup key-down = if drop editor-down 1
   else drop 1
-  then then then then then then then then then then then then
+  then then then then then then then then then then then then then then
 ] define
 
 "editor-loop" [ begin key {editor-mode} @ if handle-insert 1 else handle-normal then 0 = until ] define
