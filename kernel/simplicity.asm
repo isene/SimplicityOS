@@ -1884,10 +1884,28 @@ lookup_word:
     cmp rcx, 2
     jne .try_dup
     cmp byte [rdi], '.'
-    jne .try_dup
+    jne .try_c_fetch
     cmp byte [rdi+1], 's'
-    jne .try_dup
+    jne .try_c_fetch
     mov rax, word_dots
+    jmp .done
+
+.try_c_fetch:
+    ; c@ (char fetch, 2 chars)
+    cmp byte [rdi], 'c'
+    jne .try_c_store
+    cmp byte [rdi+1], '@'
+    jne .try_c_store
+    mov rax, word_c_fetch
+    jmp .done
+
+.try_c_store:
+    ; c! (char store, 2 chars)
+    cmp byte [rdi], 'c'
+    jne .try_dup
+    cmp byte [rdi+1], '!'
+    jne .try_dup
+    mov rax, word_c_store
     jmp .done
 
 .try_dup:
@@ -2054,16 +2072,31 @@ lookup_word:
     cmp rcx, 5
     jne .try_define
     cmp byte [rdi], 'w'
-    jne .try_define
+    jne .try_allot
     cmp byte [rdi+1], 'o'
-    jne .try_define
+    jne .try_allot
     cmp byte [rdi+2], 'r'
-    jne .try_define
+    jne .try_allot
     cmp byte [rdi+3], 'd'
-    jne .try_define
+    jne .try_allot
     cmp byte [rdi+4], 's'
-    jne .try_define
+    jne .try_allot
     mov rax, word_words
+    jmp .done
+
+.try_allot:
+    ; allot (5 chars)
+    cmp byte [rdi], 'a'
+    jne .try_define
+    cmp byte [rdi+1], 'l'
+    jne .try_define
+    cmp byte [rdi+2], 'l'
+    jne .try_define
+    cmp byte [rdi+3], 'o'
+    jne .try_define
+    cmp byte [rdi+4], 't'
+    jne .try_define
+    mov rax, word_allot
     jmp .done
 
 .try_define:
@@ -3885,6 +3918,49 @@ word_store:
     ret
 
 str_bad_addr: db '(bad address)', 0
+
+word_c_fetch:
+    ; c@ ( addr -- byte ) - Fetch byte from address
+    cmp r14, 1000
+    jl .c_fetch_invalid
+    movzx rax, byte [r14]   ; Read byte, zero-extend to 64-bit
+    mov r14, rax
+    ret
+.c_fetch_invalid:
+    push rsi
+    mov rsi, str_bad_addr
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
+    ret
+
+word_c_store:
+    ; c! ( byte addr -- ) - Store byte at address
+    cmp r14, 1000
+    jl .c_store_invalid
+    mov rax, r14            ; Address
+    sub r15, 8
+    mov rbx, [r15]          ; Byte value
+    mov [rax], bl           ; Store only low byte
+    sub r15, 8
+    mov r14, [r15]          ; New TOS
+    ret
+.c_store_invalid:
+    sub r15, 8              ; Drop addr
+    sub r15, 8              ; Drop byte
+    push rsi
+    mov rsi, str_bad_addr
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
+    ret
+
+word_allot:
+    ; allot ( n -- addr ) - Allocate n bytes from heap, return address
+    mov rcx, r14            ; Size to allocate
+    call allocate_object    ; Returns address in RAX
+    mov r14, rax            ; Push address to TOS
+    ret
 
 word_inspect:
     ; ? - Inspect reference from TOS, push STRING description
@@ -6822,7 +6898,7 @@ word_words:
     pop rbx
     ret
 
-str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write ed save restore info remove define sort', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write ed save restore info remove define sort allot', 0
 words_buffer: times 2048 db 0   ; Buffer for word list
 word_ptrs: times 256 dq 0       ; Pointers to words (max 256 words)
 word_lens: times 256 db 0       ; Lengths of words

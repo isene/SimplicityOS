@@ -1,14 +1,49 @@
 0 {editor-x} !
 0 {editor-y} !
 0 {editor-mode} !
+0 {text-buffer} !
+0 {line-lens} !
 
 "white-on-black" [ 7 ] define
 "black-on-white" [ 112 ] define
 
-"draw-char" [ white-on-black {editor-x} @ {editor-y} @ screen-char ] define
-"erase-char" [ 32 white-on-black {editor-x} @ {editor-y} @ screen-char ] define
+"init-buffer" [
+  1920 allot {text-buffer} !
+  24 allot {line-lens} !
+  1920 begin 1 - dup 0 >= while 32 over {text-buffer} @ + c! repeat drop
+  24 begin 1 - dup 0 >= while 0 over {line-lens} @ + c! repeat drop
+] define
 
-"clear-editor" [ white-on-black screen-clear 0 {editor-x} ! 0 {editor-y} ! ] define
+"buf-addr" [ 80 * + {text-buffer} @ + ] define
+"buf@" [ buf-addr c@ ] define
+"buf!" [ buf-addr c! ] define
+"line-len@" [ {line-lens} @ + c@ ] define
+"line-len!" [ {line-lens} @ + c! ] define
+
+"draw-buf-char" [
+  over over buf@
+  white-on-black
+  rot rot screen-char
+] define
+
+"draw-line" [
+  0 swap
+  begin
+    over 80 < while
+    over over draw-buf-char
+    swap 1 + swap
+  repeat
+  drop drop
+] define
+
+"draw-all" [
+  0 begin
+    dup 24 < while
+    dup draw-line
+    1 +
+  repeat
+  drop
+] define
 
 "move-cursor" [ {editor-x} @ {editor-y} @ screen-set ] define
 
@@ -19,16 +54,90 @@
 "fill-status" [ 80 begin 1 - dup fill-one dup 0 = until drop ] define
 "status-line" [ move-cursor fill-status draw-mode draw-x draw-y move-cursor ] define
 
-"editor-left" [ {editor-x} @ 0 > if {editor-x} @ 1 - {editor-x} ! then status-line ] define
-"editor-right" [ {editor-x} @ 78 < if {editor-x} @ 1 + {editor-x} ! then status-line ] define
-"editor-up" [ {editor-y} @ 0 > if {editor-y} @ 1 - {editor-y} ! then status-line ] define
-"editor-down" [ {editor-y} @ 22 < if {editor-y} @ 1 + {editor-y} ! then status-line ] define
+"clear-editor" [ white-on-black screen-clear 0 {editor-x} ! 0 {editor-y} ! init-buffer draw-all ] define
 
-"editor-enter" [ 0 {editor-x} ! {editor-y} @ 22 < if {editor-y} @ 1 + {editor-y} ! then status-line ] define
-"editor-backspace" [ {editor-x} @ 0 > if {editor-x} @ 1 - {editor-x} ! {editor-x} @ {editor-y} @ screen-line-shift then status-line ] define
-"editor-delete" [ {editor-x} @ {editor-y} @ screen-line-shift status-line ] define
+"editor-left" [
+  {editor-x} @ 0 > if
+    {editor-x} @ 1 - {editor-x} !
+  else
+    {editor-y} @ 0 > if
+      {editor-y} @ 1 - {editor-y} !
+      {editor-y} @ line-len@ {editor-x} !
+    then
+  then
+  status-line
+] define
 
-"insert-char" [ draw-char editor-right ] define
+"editor-right" [
+  {editor-x} @ {editor-y} @ line-len@ < if
+    {editor-x} @ 1 + {editor-x} !
+  else
+    {editor-y} @ 23 < if
+      0 {editor-x} !
+      {editor-y} @ 1 + {editor-y} !
+    then
+  then
+  status-line
+] define
+
+"editor-up" [ {editor-y} @ 0 > if {editor-y} @ 1 - {editor-y} ! {editor-x} @ {editor-y} @ line-len@ > if {editor-y} @ line-len@ {editor-x} ! then then status-line ] define
+"editor-down" [ {editor-y} @ 23 < if {editor-y} @ 1 + {editor-y} ! {editor-x} @ {editor-y} @ line-len@ > if {editor-y} @ line-len@ {editor-x} ! then then status-line ] define
+
+"shift-line-right" [
+  {editor-y} @ line-len@ 79 < if
+    79 begin
+      dup {editor-x} @ > while
+      dup 1 - {editor-y} @ buf@ over {editor-y} @ buf!
+      1 -
+    repeat
+    drop
+    {editor-y} @ line-len@ 1 + {editor-y} @ line-len!
+  then
+] define
+
+"shift-line-left" [
+  {editor-x} @ begin
+    dup 78 < while
+    dup 1 + {editor-y} @ buf@ over {editor-y} @ buf!
+    1 +
+  repeat
+  drop
+  32 79 {editor-y} @ buf!
+  {editor-y} @ line-len@ 0 > if
+    {editor-y} @ line-len@ 1 - {editor-y} @ line-len!
+  then
+] define
+
+"insert-char" [
+  shift-line-right
+  {editor-x} @ {editor-y} @ buf!
+  {editor-y} @ draw-line
+  {editor-x} @ {editor-y} @ line-len@ < if
+    {editor-x} @ 1 + {editor-x} !
+  then
+  status-line
+] define
+
+"editor-enter" [
+  0 {editor-x} !
+  {editor-y} @ 23 < if {editor-y} @ 1 + {editor-y} ! then
+  status-line
+] define
+
+"editor-backspace" [
+  {editor-x} @ 0 > if
+    {editor-x} @ 1 - {editor-x} !
+    shift-line-left
+    {editor-y} @ draw-line
+  then
+  status-line
+] define
+
+"editor-delete" [
+  shift-line-left
+  {editor-y} @ draw-line
+  status-line
+] define
 
 "enter-insert" [ 1 {editor-mode} ! status-line ] define
 "exit-insert" [ 0 {editor-mode} ! status-line ] define
