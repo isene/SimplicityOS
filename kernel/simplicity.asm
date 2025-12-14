@@ -2344,14 +2344,29 @@ lookup_word:
 
 .try_len:
     cmp rcx, 3
-    jne .try_type
+    jne .try_str_eq
     cmp byte [rdi], 'l'
-    jne .try_type
+    jne .try_str_eq
     cmp byte [rdi+1], 'e'
-    jne .try_type
+    jne .try_str_eq
     cmp byte [rdi+2], 'n'
-    jne .try_type
+    jne .try_str_eq
     mov rax, word_len
+    jmp .done
+
+.try_str_eq:
+    ; str= (4 chars) - compare two strings
+    cmp rcx, 4
+    jne .try_type
+    cmp byte [rdi], 's'
+    jne .try_type
+    cmp byte [rdi+1], 't'
+    jne .try_type
+    cmp byte [rdi+2], 'r'
+    jne .try_type
+    cmp byte [rdi+3], '='
+    jne .try_type
+    mov rax, word_str_eq
     jmp .done
 
 .try_type:
@@ -4203,6 +4218,51 @@ word_len:
 .len_array:
     ; Array length is in header
     mov r14, [rax+8]
+    ret
+
+; STR= - Compare two strings for equality ( str1 str2 -- flag )
+; Returns 1 if equal, 0 if not equal
+word_str_eq:
+    ; Get str2 from TOS
+    mov rsi, r14
+    ; Get str1 from second
+    sub r15, 8
+    mov rdi, [r15]
+    mov r14, [r15-8]        ; New TOS
+
+    ; Check if both are STRING type
+    cmp qword [rdi], TYPE_STRING
+    jne .str_eq_false
+    cmp qword [rsi], TYPE_STRING
+    jne .str_eq_false
+
+    ; Check lengths match
+    mov rax, [rdi+8]        ; str1 length
+    cmp rax, [rsi+8]        ; str2 length
+    jne .str_eq_false
+
+    ; Compare bytes (data starts at offset 16)
+    add rdi, 16             ; str1 data
+    add rsi, 16             ; str2 data
+    mov rcx, rax            ; length
+    test rcx, rcx
+    jz .str_eq_true         ; Empty strings are equal
+
+.str_eq_loop:
+    mov al, [rdi]
+    cmp al, [rsi]
+    jne .str_eq_false
+    inc rdi
+    inc rsi
+    dec rcx
+    jnz .str_eq_loop
+
+.str_eq_true:
+    mov r14, 1
+    ret
+
+.str_eq_false:
+    xor r14, r14
     ret
 
 word_type:
