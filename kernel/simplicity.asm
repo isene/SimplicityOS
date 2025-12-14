@@ -284,6 +284,21 @@ update_hw_cursor:
     push rbx
     push rdx
 
+    ; Enable cursor and set shape (underline: scanlines 13-14)
+    mov al, 0x0A            ; Cursor start register
+    mov dx, 0x3D4
+    out dx, al
+    mov al, 13              ; Start scanline 13, cursor enabled (bit 5 = 0)
+    mov dx, 0x3D5
+    out dx, al
+
+    mov al, 0x0B            ; Cursor end register
+    mov dx, 0x3D4
+    out dx, al
+    mov al, 14              ; End scanline 14
+    mov dx, 0x3D5
+    out dx, al
+
     ; Calculate cursor position
     mov rax, [cursor]
     sub rax, 0xB8000
@@ -724,7 +739,9 @@ REPL:
     cmp al, 8                       ; Backspace?
     je .handle_backspace
 
-    cmp al, 127                     ; Delete?
+    cmp al, 127                     ; Delete (ASCII)?
+    je .handle_delete
+    cmp rax, KEY_DELETE             ; Delete key (scancode)
     je .handle_delete
 
     ; Arrow keys (KEY_UP=257, KEY_DOWN=258, KEY_LEFT=259, KEY_RIGHT=260)
@@ -808,13 +825,11 @@ REPL:
 .backspace_done:
     dec qword [cursor_pos]
     dec rcx
-    ; Visual feedback: move cursor back, print space, move back
+    ; Move cursor back, then redraw from cursor to end
     mov rbx, [cursor]
     sub rbx, 2
-    mov byte [rbx], ' '
-    mov byte [rbx+1], 0x0E
     mov [cursor], rbx
-    call update_hw_cursor
+    call redraw_line
     jmp .read_char
 
 .handle_delete:
@@ -982,7 +997,7 @@ reprint_line:
     ret
 
 redraw_line:
-    ; Redraw from cursor position to end of line
+    ; Redraw from cursor position to end of line + clear trailing
     ; RCX = total line length, cursor_pos = where we are
     push rax
     push rbx
@@ -1003,9 +1018,14 @@ redraw_line:
     jmp .print_loop
 .print_done:
 
-    ; Move cursor back to correct position
+    ; Clear one trailing character (in case we deleted)
+    mov al, ' '
+    call emit_char
+
+    ; Move cursor back to correct position (one extra for the space we printed)
     mov rbx, rcx
     sub rbx, [cursor_pos]           ; How many chars we printed
+    inc rbx                         ; Plus the trailing space
     shl rbx, 1                      ; Convert to VGA offset
     mov rax, [cursor]
     sub rax, rbx
@@ -1302,6 +1322,7 @@ get_or_create_named_var:
     push rcx
     push r8                 ; Save search name ptr
     push r9                 ; Save length
+    push rax                ; Save end marker (RAX gets corrupted by byte compare)
 
     lea rbx, [rbx+16]       ; String data
     mov rdi, r8             ; Name to find
@@ -1317,6 +1338,7 @@ get_or_create_named_var:
     dec rcx
     jmp .cmp_loop
 .names_differ:
+    pop rax                 ; Restore end marker
     pop r9
     pop r8
     pop rcx
@@ -1325,6 +1347,7 @@ get_or_create_named_var:
     add rsi, 16             ; Next entry
     jmp .search_loop
 .names_match:
+    pop rax                 ; Restore end marker
     pop r9
     pop r8
     pop rcx
@@ -2179,6 +2202,8 @@ lookup_word:
     je .check_screen_clear
     cmp rcx, 13
     je .check_screen_scroll
+    cmp rcx, 17
+    je .check_screen_line_shift
     jmp .try_see             ; Unknown screen-* length
 
 .check_screen_get_set:
@@ -2245,6 +2270,31 @@ lookup_word:
     cmp byte [rdi+12], 'l'
     jne .try_see
     mov rax, word_screen_scroll
+    jmp .done
+
+.check_screen_line_shift:
+    ; screen-line-shift (17 chars)
+    cmp byte [rdi+7], 'l'
+    jne .try_see
+    cmp byte [rdi+8], 'i'
+    jne .try_see
+    cmp byte [rdi+9], 'n'
+    jne .try_see
+    cmp byte [rdi+10], 'e'
+    jne .try_see
+    cmp byte [rdi+11], '-'
+    jne .try_see
+    cmp byte [rdi+12], 's'
+    jne .try_see
+    cmp byte [rdi+13], 'h'
+    jne .try_see
+    cmp byte [rdi+14], 'i'
+    jne .try_see
+    cmp byte [rdi+15], 'f'
+    jne .try_see
+    cmp byte [rdi+16], 't'
+    jne .try_see
+    mov rax, word_screen_line_shift
     jmp .done
 
 .try_see:
@@ -3640,7 +3690,7 @@ word_varcount:
     ; Push named variable count ( -- n )
     cmp r15, data_stack
     je .vc_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, [named_var_count]
     ret
@@ -3920,7 +3970,7 @@ word_execute:
     lodsq
     cmp r15, data_stack
     je .lit_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, rax
     jmp .exec_loop
@@ -4105,7 +4155,7 @@ word_type_new:
     ; Push to TOS
     cmp r15, data_stack
     je .tn_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, rax
     jmp .tn_done
@@ -4470,6 +4520,62 @@ word_screen_scroll:
     xor r14, r14
     ret
 
+word_screen_line_shift:
+    ; SCREEN-LINE-SHIFT - Shift line content left from x,y ( x y -- )
+    ; Shifts chars from x+1 to column 79 left by 1, puts space at end
+    push rbx
+    push rcx
+    push rsi
+    push rdi
+
+    ; TOS = y, second = x
+    mov rax, r14            ; RAX = y
+    sub r15, 8
+    mov rbx, [r15]          ; RBX = x
+
+    ; Calculate start address: (y * 80 + x) * 2 + 0xB8000
+    imul rax, 80
+    add rax, rbx
+    shl rax, 1
+    add rax, 0xB8000
+    mov rdi, rax            ; RDI = destination (current pos)
+    lea rsi, [rax + 2]      ; RSI = source (next char)
+
+    ; Calculate chars to shift: 79 - x
+    mov rcx, 79
+    sub rcx, rbx
+    jle .sls_done           ; Nothing to shift if at end
+
+    ; Shift characters left (copy char+attr pairs)
+.sls_shift:
+    mov ax, [rsi]           ; Read char+attr
+    mov [rdi], ax           ; Write to destination
+    add rsi, 2
+    add rdi, 2
+    dec rcx
+    jnz .sls_shift
+
+    ; Put space at end of line (column 79 of this row)
+    mov byte [rdi], ' '
+    ; Keep existing attribute
+
+.sls_done:
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rbx
+
+    ; Pop both args, load new TOS
+    sub r15, 8
+    cmp r15, data_stack
+    jle .sls_empty
+    mov r14, [r15]
+    ret
+.sls_empty:
+    mov r15, data_stack
+    xor r14, r14
+    ret
+
 word_key:
     ; KEY - Wait for keypress ( -- char )
     call wait_key
@@ -4506,7 +4612,7 @@ word_key_escape:
     ; KEY-ESCAPE - Push escape key constant ( -- 256 )
     cmp r15, data_stack
     je .ke_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, KEY_ESCAPE
     ret
@@ -4519,7 +4625,7 @@ word_key_up:
     ; KEY-UP - Push up arrow constant ( -- 257 )
     cmp r15, data_stack
     je .ku_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, KEY_UP
     ret
@@ -4532,7 +4638,7 @@ word_key_down:
     ; KEY-DOWN - Push down arrow constant ( -- 258 )
     cmp r15, data_stack
     je .kd_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, KEY_DOWN
     ret
@@ -4545,7 +4651,7 @@ word_key_left:
     ; KEY-LEFT - Push left arrow constant ( -- 259 )
     cmp r15, data_stack
     je .kl_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, KEY_LEFT
     ret
@@ -4558,7 +4664,7 @@ word_key_right:
     ; KEY-RIGHT - Push right arrow constant ( -- 260 )
     cmp r15, data_stack
     je .kr_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, KEY_RIGHT
     ret
@@ -4571,7 +4677,7 @@ word_key_delete:
     ; KEY-DELETE - Push delete key constant ( -- 265 )
     cmp r15, data_stack
     je .kdel_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, KEY_DELETE
     ret
@@ -4584,7 +4690,7 @@ word_key_backspace:
     ; KEY-BACKSPACE - Push backspace constant ( -- 8 )
     cmp r15, data_stack
     je .kbs_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, 8
     ret
@@ -4828,7 +4934,7 @@ word_app_stack:
     ; Push to TOS
     cmp r15, data_stack
     je .as_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, rax
     ret
@@ -4855,7 +4961,7 @@ word_app_depth:
     je .ad_first
     cmp r15, app_stack
     je .ad_first
-    mov [r15-8], r14
+    mov [r15], r14
     add r15, 8
     mov r14, rbx
     ret

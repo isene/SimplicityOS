@@ -6,7 +6,7 @@
 "black-on-white" [ 112 ] define
 
 "draw-char" [ white-on-black {editor-x} @ {editor-y} @ screen-char ] define
-"erase-char" [ 32 white-on-black rot rot screen-char ] define
+"erase-char" [ 32 white-on-black {editor-x} @ {editor-y} @ screen-char ] define
 
 "clear-editor" [ white-on-black screen-clear 0 {editor-x} ! 0 {editor-y} ! ] define
 
@@ -17,7 +17,7 @@
 "draw-y" [ 89 black-on-white 12 24 screen-char 58 black-on-white 13 24 screen-char {editor-y} @ 10 / 48 + black-on-white 14 24 screen-char {editor-y} @ 10 mod 48 + black-on-white 15 24 screen-char ] define
 "fill-one" [ 32 black-on-white rot 24 screen-char ] define
 "fill-status" [ 80 begin 1 - dup fill-one dup 0 = until drop ] define
-"status-line" [ fill-status draw-mode draw-x draw-y move-cursor ] define
+"status-line" [ move-cursor fill-status draw-mode draw-x draw-y move-cursor ] define
 
 "editor-left" [ {editor-x} @ 0 > if {editor-x} @ 1 - {editor-x} ! then status-line ] define
 "editor-right" [ {editor-x} @ 78 < if {editor-x} @ 1 + {editor-x} ! then status-line ] define
@@ -25,8 +25,8 @@
 "editor-down" [ {editor-y} @ 22 < if {editor-y} @ 1 + {editor-y} ! then status-line ] define
 
 "editor-enter" [ 0 {editor-x} ! {editor-y} @ 22 < if {editor-y} @ 1 + {editor-y} ! then status-line ] define
-"editor-backspace" [ {editor-x} @ 0 > if {editor-x} @ 1 - {editor-x} ! {editor-x} @ {editor-y} @ erase-char then status-line ] define
-"editor-delete" [ {editor-x} @ {editor-y} @ erase-char status-line ] define
+"editor-backspace" [ {editor-x} @ 0 > if {editor-x} @ 1 - {editor-x} ! {editor-x} @ {editor-y} @ screen-line-shift then status-line ] define
+"editor-delete" [ {editor-x} @ {editor-y} @ screen-line-shift status-line ] define
 
 "insert-char" [ draw-char editor-right ] define
 
