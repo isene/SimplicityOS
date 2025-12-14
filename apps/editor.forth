@@ -6,6 +6,9 @@
 
 "white-on-black" [ 7 ] define
 "black-on-white" [ 112 ] define
+"white-on-green" [ 39 ] define
+
+"status-color" [ {editor-mode} @ if white-on-green else black-on-white then ] define
 
 "init-buffer" [
   1920 allot {text-buffer} !
@@ -56,22 +59,38 @@
 ] define
 
 "clear-status" [
-  0 begin dup 80 < while 32 black-on-white over 24 screen-char 1 + repeat drop
+  0 begin dup 80 < while 32 status-color over 24 screen-char 1 + repeat drop
 ] define
 
-"draw-mode" [ {editor-mode} @ if 73 else 78 then black-on-white 1 24 screen-char ] define
+"draw-normal" [
+  78 status-color 1 24 screen-char
+  111 status-color 2 24 screen-char
+  114 status-color 3 24 screen-char
+  109 status-color 4 24 screen-char
+  97 status-color 5 24 screen-char
+  108 status-color 6 24 screen-char
+] define
+
+"draw-insert" [
+  73 status-color 1 24 screen-char
+  110 status-color 2 24 screen-char
+  115 status-color 3 24 screen-char
+  101 status-color 4 24 screen-char
+  114 status-color 5 24 screen-char
+  116 status-color 6 24 screen-char
+] define
+
+"draw-mode" [ {editor-mode} @ if draw-insert else draw-normal then ] define
 
 "draw-file-num" [
-  {file-num} @ 48 + black-on-white 10 24 screen-char
+  70 status-color 10 24 screen-char
+  58 status-color 11 24 screen-char
+  {file-num} @ 48 + status-color 12 24 screen-char
 ] define
 
 "status-line" [
   clear-status
-  45 black-on-white 0 24 screen-char
   draw-mode
-  45 black-on-white 2 24 screen-char
-  70 black-on-white 8 24 screen-char
-  58 black-on-white 9 24 screen-char
   draw-file-num
   move-cursor
 ] define
@@ -113,7 +132,7 @@
 
 "handle-insert" [
   dup key-escape = if drop exit-insert
-  else dup 96 = if drop exit-insert
+  else dup 3 = if drop exit-insert
   else dup 10 = if drop editor-enter
   else dup key-left = if drop editor-left
   else dup key-right = if drop editor-right
@@ -127,8 +146,8 @@
 "file-next" [ {file-num} @ 9 < if {file-num} @ 1 + {file-num} ! then status-line ] define
 "file-prev" [ {file-num} @ 0 > if {file-num} @ 1 - {file-num} ! then status-line ] define
 
-"do-save" [ save-file 83 black-on-white 15 24 screen-char move-cursor ] define
-"do-load" [ load-file redraw-all 76 black-on-white 15 24 screen-char move-cursor ] define
+"do-save" [ save-file 83 status-color 15 24 screen-char move-cursor ] define
+"do-load" [ load-file redraw-all 76 status-color 15 24 screen-char move-cursor ] define
 
 "handle-normal" [
   dup 113 = if drop 0
