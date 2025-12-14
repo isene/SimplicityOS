@@ -106,4 +106,4 @@
 
 "editor-loop" [ begin key {editor-mode} @ if handle-insert 1 else handle-normal then 0 = until ] define
 
-"editor" [ clear-editor status-line move-cursor editor-loop white-on-black screen-clear 0 0 screen-set ] define
+"editor" [ app-enter clear-editor status-line move-cursor editor-loop white-on-black screen-clear 0 0 screen-set app-exit ] define
