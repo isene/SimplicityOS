@@ -59,7 +59,9 @@
 ] define
 
 "clear-status" [
-  0 begin dup 80 < while 32 status-color over 24 screen-char 1 + repeat drop
+  0 begin dup 80 < while
+    dup 32 swap status-color swap 24 screen-char
+  1 + repeat drop
 ] define
 
 "draw-normal" [
