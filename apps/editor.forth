@@ -2,6 +2,7 @@
 0 {editor-y} !
 0 {editor-mode} !
 0 {text-buffer} !
+0 {file-num} !
 
 "white-on-black" [ 7 ] define
 "black-on-white" [ 112 ] define
@@ -24,6 +25,35 @@
 ] define
 
 "move-cursor" [ {editor-x} @ {editor-y} @ screen-set ] define
+
+"file-sector" [ {file-num} @ 4 * 300 + ] define
+
+"save-file" [
+  {text-buffer} @ file-sector disk-write
+  {text-buffer} @ 512 + file-sector 1 + disk-write
+  {text-buffer} @ 1024 + file-sector 2 + disk-write
+  {text-buffer} @ 1536 + file-sector 3 + disk-write
+] define
+
+"load-file" [
+  file-sector {text-buffer} @ disk-read
+  file-sector 1 + {text-buffer} @ 512 + disk-read
+  file-sector 2 + {text-buffer} @ 1024 + disk-read
+  file-sector 3 + {text-buffer} @ 1536 + disk-read
+] define
+
+"redraw-line" [
+  0 swap begin over 80 < while over over draw-char-at swap 1 + swap repeat drop drop
+] define
+
+"redraw-all" [
+  0 redraw-line 1 redraw-line 2 redraw-line 3 redraw-line
+  4 redraw-line 5 redraw-line 6 redraw-line 7 redraw-line
+  8 redraw-line 9 redraw-line 10 redraw-line 11 redraw-line
+  12 redraw-line 13 redraw-line 14 redraw-line 15 redraw-line
+  16 redraw-line 17 redraw-line 18 redraw-line 19 redraw-line
+  20 redraw-line 21 redraw-line 22 redraw-line 23 redraw-line
+] define
 
 "draw-mode" [ {editor-mode} @ if 73 else 78 then black-on-white 1 24 screen-char ] define
 
@@ -60,6 +90,8 @@
 "handle-normal" [
   dup 113 = if drop 0
   else dup 105 = if drop enter-insert 1
+  else dup 115 = if drop save-file status-line 1
+  else dup 111 = if drop load-file status-line 1
   else dup 104 = if drop editor-left 1
   else dup 108 = if drop editor-right 1
   else dup 106 = if drop editor-down 1
@@ -69,7 +101,7 @@
   else dup key-up = if drop editor-up 1
   else dup key-down = if drop editor-down 1
   else drop 1
-  then then then then then then then then then then
+  then then then then then then then then then then then then
 ] define
 
 "editor-loop" [ begin key {editor-mode} @ if handle-insert 1 else handle-normal then 0 = until ] define
