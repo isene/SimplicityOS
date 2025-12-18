@@ -1,90 +1,161 @@
 # Simplicity OS - Testing Guide
 
-## Quick Test
+## Quick Start
 
 ```bash
-make run
+make clean && make   # Build (always use clean for app changes)
+make run             # Run in QEMU (user runs this in their terminal)
 ```
 
-Press `Esc` then `2` to exit QEMU.
-
-## Expected Output
-
-You should see:
-
-1. BIOS boot messages
-2. "Simplicity OS booting..."
-3. "Stage2 loaded"
-4. Screen clears
-5. "Prot" (green) - protected mode active
-6. "Long mode active!" (yellow) - 64-bit mode
-7. Forth kernel messages and arithmetic results
-
-## What the Test Does
-
-The cold start code in `kernel/forth.asm` executes:
-
-```forth
-2 3 + .    ( pushes 2, pushes 3, adds, prints → "5 " )
-5 7 * .    ( pushes 5, pushes 7, multiplies, prints → "35 " )
-BYE        ( halts system )
-```
-
-Expected screen output after kernel starts:
-```
-Simplicity OS v0.1
-Forth kernel ready
-
-5 35
-```
-
-System then halts.
+Press `q` in editor to exit, or Ctrl+Alt+2 then `quit` in QEMU monitor.
 
 ## Build Commands
 
 ```bash
 make          # Build disk image
-make run      # Run in QEMU
-make debug    # Run with GDB stub
-make test     # Automated boot test
-make clean    # Remove build artifacts
+make run      # Run in QEMU with GUI
+make clean    # Remove build artifacts (REQUIRED before rebuild if apps changed)
 ```
 
-## Debugging
+**IMPORTANT**: The Makefile doesn't detect changes to `apps/*.forth` files. Always run `make clean && make` when modifying editor.forth or other apps.
 
-If system triple-faults or reboots:
-- Check boot sector signature (0xAA55 at offset 510)
-- Verify stage2 GDT setup
-- Confirm paging tables identity-map 0-2MB
-- Ensure kernel at correct offset in disk image
+## Manual Testing (Recommended)
 
-If arithmetic is wrong:
-- Check stack pointer initialization
-- Verify NEXT implementation
-- Inspect word definitions in kernel/forth.asm
+For full functionality, test manually with `make run`:
 
-## QEMU Options
+### Test REPL
+```
+> 2 3 + .
+5 ok
+> "hello" .
+'hello' ok
+```
+
+### Test Editor with Filename
+```
+> "myfile" editor
+```
+- Press `i` to enter insert mode
+- Type some text
+- Press `Escape` to return to normal mode
+- Press `s` to save
+- Press `q` to quit
+- Run `"myfile" editor` again - text should load
+
+### Test Editor without Filename
+```
+> 0 editor
+```
+Opens editor with empty buffer, no file association.
+
+## Automated Testing with VNC (Claude Code Sessions)
+
+When Claude Code needs to test, use VNC:
 
 ```bash
-# Headless test
-qemu-system-x86_64 -drive format=raw,file=simplicity.img -nographic
+# Start QEMU with VNC (display :1 = port 5901)
+qemu-system-x86_64 -drive file=build/simplicity.img,format=raw,cache=none -vnc :1 -daemonize
 
-# With GUI
-qemu-system-x86_64 -drive format=raw,file=simplicity.img
+# Verify running
+pgrep -a qemu
 
-# Debug mode
-qemu-system-x86_64 -drive format=raw,file=simplicity.img -s -S
-# Then: gdb -ex 'target remote localhost:1234'
+# Capture screenshot
+vncdotool -s :1 capture /tmp/screen.png
+
+# Type and capture
+vncdotool -s :1 type 'hello' key enter pause 1 capture /tmp/result.png
+
+# Kill when done
+pkill -9 qemu
 ```
 
-## Current Limitations
+### CRITICAL: VNC Keyboard Mapping Bug
 
-- No keyboard input yet (Stage 1)
-- No disk I/O after boot (Stage 3)
-- No graphics mode (Stage 4)
-- Single-tasking only
-- No interrupts enabled
+**vncdotool converts double quotes (`"`) to single quotes (`'`).**
 
-## Next Stage
+This means string literals don't work via VNC automation:
+```bash
+# BROKEN - quotes are mangled:
+printf '%s' '"test" editor' | vncdotool -s :1 typefile /dev/stdin
+# System sees: 'test' editor  (tries to look up 'test' as word, fails)
 
-Stage 1 will add keyboard input for interactive Forth REPL.
+# WORKS - numbers pass correctly:
+vncdotool -s :1 type '999 editor' key enter
+```
+
+**Workaround**: Test with numbers instead of strings, or have user test strings manually.
+
+### VNC Test Examples
+
+```bash
+# Test editor with number argument (verifies argument passing)
+vncdotool -s :1 type '123 editor' key enter pause 2 capture /tmp/test.png
+
+# Exit editor
+vncdotool -s :1 key q pause 1
+
+# Run hello app
+vncdotool -s :1 type 'hello' key enter pause 1 capture /tmp/hello.png
+```
+
+## Debug Markers in Editor
+
+When debugging, editor.forth may have markers that appear on screen:
+
+| Position | Char | Meaning |
+|----------|------|---------|
+| (3, 0)   | A/a  | Argument was/wasn't non-zero at editor start |
+| (5, 0)   | F/f  | {filename} is/isn't non-zero after clear-editor |
+| (10-12, 0) | 123 | editor-start function reached |
+| (0, 1)   | Y/Z  | try-load found/didn't find filename |
+
+Remove debug code before committing.
+
+## Disk Persistence
+
+QEMU must use `cache=none` for disk writes to persist:
+```bash
+qemu-system-x86_64 -drive file=build/simplicity.img,format=raw,cache=none ...
+```
+
+Without this, file saves appear to work but data is lost on restart.
+
+## File System Layout
+
+| Sector | Contents |
+|--------|----------|
+| 200 | App directory (app names + start sectors) |
+| 201+ | App code (editor, hello, etc.) |
+| 250 | File directory (16 entries, 32 bytes each) |
+| 300+ | File data (4 sectors = 2KB per file) |
+
+## Troubleshooting
+
+### Editor exits immediately
+- Check for stack underflow in editor.forth
+- Verify app-enter/app-exit are balanced
+
+### File doesn't load
+- Ensure QEMU uses `cache=none`
+- Check file was saved (press 's' before 'q')
+- Verify filename matches exactly
+
+### Build doesn't include changes
+- Run `make clean && make` (app changes need clean rebuild)
+
+### VNC typing not working
+- Check QEMU is running: `pgrep -a qemu`
+- Check VNC port: `ss -tln | grep 5901`
+- Try restarting QEMU
+
+### Strings don't work via VNC
+- This is a vncdotool keyboard mapping bug
+- Use numbers for automated testing
+- Test strings manually with `make run`
+
+## Architecture Notes
+
+- Stack: R14 = TOS (cached), R15 = stack pointer
+- Variables: Stored in named_vars array (BSS section)
+- Heap: Starts at 0x200000 (2MB), grows upward
+- VGA: Text mode at 0xB8000, 80x25 characters

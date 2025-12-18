@@ -13,12 +13,12 @@
 "status-color" [ {editor-mode} @ if white-on-green else black-on-white then ] define
 
 "init-buffer" [
-  1920 allot {text-buffer} !
+  {text-buffer} @ 0 = if 1920 allot {text-buffer} ! then
   0 begin dup 1920 < while 32 over {text-buffer} @ + c! 1 + repeat drop
 ] define
 
 "init-dir-buffer" [
-  512 allot {dir-buffer} !
+  {dir-buffer} @ 0 = if 512 allot {dir-buffer} ! then
 ] define
 
 "buf-addr" [ {text-buffer} @ + ] define
@@ -43,31 +43,49 @@
 "entry-sector" [ entry-addr 16 + ] define
 
 "get-entry-sector" [ entry-sector dup c@ swap 1 + c@ 256 * + ] define
-"set-entry-sector" [ over 255 and over entry-sector c! swap 256 / swap entry-sector 1 + c! drop ] define
+
+0 {set-entry} !
+0 {set-sector} !
+"set-entry-sector" [
+  {set-entry} !
+  {set-sector} !
+  {set-sector} @ 255 and {dir-buffer} @ {set-entry} @ 32 * + 16 + c!
+  {set-sector} @ 256 / {dir-buffer} @ {set-entry} @ 32 * + 17 + c!
+] define
 
 0 {cmp-a} !
 0 {cmp-b} !
+0 {match-entry} !
 
 "name-match" [
-  1
-  0 begin dup 16 < while
-    dup entry-name + c@ {cmp-a} !
-    dup {filename} @ 16 + + c@ {cmp-b} !
-    {cmp-a} @ {cmp-b} @ <> if swap drop 0 swap 16 else
-      {cmp-a} @ 0 = if 16 else 1 + then
+  {match-entry} !
+  0 {cmp-a} !
+  0 begin dup 16 < {cmp-a} @ 0 = and while
+    {match-entry} @ entry-name over + c@
+    dup 0 = if
+      drop drop 16
+    else
+      over {filename} @ 16 + + c@
+      <> if 1 {cmp-a} ! then
+      1 +
     then
-  repeat
-  drop
+  repeat drop
+  {cmp-a} @ 0 =
 ] define
 
 "find-file" [
   read-dir
   0 {file-sector} !
   0 begin dup 16 < while
-    dup entry-name c@ 0 <> if
+    dup entry-name c@ dup 0 <> if
+      69 7 77 0 screen-char
+      drop
       dup name-match if
         dup get-entry-sector {file-sector} !
+        70 7 78 0 screen-char
       then
+    else
+      drop
     then
     1 +
   repeat drop
@@ -99,13 +117,16 @@
   repeat drop
 ] define
 
+0 {create-entry} !
 "create-file" [
   read-dir
+  67 7 2 1 screen-char
   0 begin dup 16 < while
     dup entry-name c@ 0 = if
-      next-free-sector over set-entry-sector
-      dup copy-name-to-entry
-      dup get-entry-sector {file-sector} !
+      {create-entry} !
+      next-free-sector {create-entry} @ set-entry-sector
+      {create-entry} @ copy-name-to-entry
+      {create-entry} @ get-entry-sector {file-sector} !
       write-dir
       16
     else
@@ -116,9 +137,11 @@
 ] define
 
 "save-file" [
+  88 7 0 1 screen-char
   {filename} @ 0 <> if
+    83 7 1 1 screen-char
     find-file
-    0 = if create-file drop then
+    0 = if 78 7 1 1 screen-char create-file drop then
     {file-sector} @ 0 = if else
       {text-buffer} @ {file-sector} @ disk-write
       {text-buffer} @ 512 + {file-sector} @ 1 + disk-write
@@ -129,15 +152,10 @@
 ] define
 
 "load-file" [
-  {filename} @ 0 <> if
-    find-file
-    0 = if else
-      {file-sector} @ {text-buffer} @ disk-read
-      {file-sector} @ 1 + {text-buffer} @ 512 + disk-read
-      {file-sector} @ 2 + {text-buffer} @ 1024 + disk-read
-      {file-sector} @ 3 + {text-buffer} @ 1536 + disk-read
-    then
-  then
+  {file-sector} @ {text-buffer} @ disk-read
+  {file-sector} @ 1 + {text-buffer} @ 512 + disk-read
+  {file-sector} @ 2 + {text-buffer} @ 1024 + disk-read
+  {file-sector} @ 3 + {text-buffer} @ 1536 + disk-read
 ] define
 
 "redraw-line" [
@@ -235,17 +253,28 @@
 "enter-insert" [ 1 {editor-mode} ! status-line ] define
 "exit-insert" [ 0 {editor-mode} ! status-line ] define
 
+"editor-backspace" [
+  {editor-x} @ 0 > if
+    {editor-x} @ 1 - {editor-x} !
+    32 {editor-x} @ {editor-y} @ xy-to-offset buf!
+    {editor-x} @ {editor-y} @ draw-char-at
+    status-line
+  then
+] define
+
 "handle-insert" [
   dup key-escape = if drop exit-insert
   else dup 3 = if drop exit-insert
   else dup 10 = if drop editor-enter
+  else dup 127 = if drop editor-backspace
+  else dup 8 = if drop editor-backspace
   else dup key-left = if drop editor-left
   else dup key-right = if drop editor-right
   else dup key-up = if drop editor-up
   else dup key-down = if drop editor-down
   else dup 32 >= over 126 <= and if insert-char
   else drop
-  then then then then then then then then
+  then then then then then then then then then then
 ] define
 
 "do-save" [ save-file 83 status-color 22 24 screen-char move-cursor ] define
@@ -271,8 +300,14 @@
 "editor-loop" [ begin key {editor-mode} @ if handle-insert 1 else handle-normal then 0 = until ] define
 
 "try-load" [
-  {filename} @ 0 <> if
-    find-file 0 <> if load-file redraw-all then
+  {filename} @ dup 0 <> if
+    find-file dup 0 <> if
+      load-file redraw-all
+    else
+      drop
+    then
+  else
+    drop
   then
 ] define
 
@@ -287,4 +322,8 @@
   app-exit
 ] define
 
-"editor" [ {filename} ! init-dir-buffer editor-start ] define
+"editor" [
+  {filename} !
+  init-dir-buffer
+  editor-start
+] define
