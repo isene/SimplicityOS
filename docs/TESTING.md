@@ -48,6 +48,22 @@ For full functionality, test manually with `make run`:
 ```
 Opens editor with empty buffer, no file association.
 
+### Test Command Mode (:w filename)
+```
+> 0 editor
+```
+1. Press `:` to enter command mode (status bar shows `:`)
+2. Type `w myfile` and press Enter - saves as "myfile"
+3. Press `:` again, type `q` and Enter - quit
+4. Run `"myfile" editor` to reopen the file
+
+**Supported commands:**
+- `:w` - save current file
+- `:w filename` - save as filename (creates file if new)
+- `:q` - quit
+- `:wq` - save and quit
+- `Escape` - cancel command mode
+
 ## Automated Testing with VNC (Claude Code Sessions)
 
 When Claude Code needs to test, use VNC:

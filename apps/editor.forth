@@ -5,6 +5,8 @@
 0 {filename} !
 0 {dir-buffer} !
 0 {file-sector} !
+0 {cmd-buffer} !
+0 {cmd-pos} !
 
 "white-on-black" [ 7 ] define
 "black-on-white" [ 112 ] define
@@ -19,6 +21,38 @@
 
 "init-dir-buffer" [
   {dir-buffer} @ 0 = if 512 allot {dir-buffer} ! then
+] define
+
+"init-cmd-buffer" [
+  {cmd-buffer} @ 0 = if 80 allot {cmd-buffer} ! then
+  0 {cmd-pos} !
+] define
+
+"cmd-buf@" [ {cmd-buffer} @ + c@ ] define
+"cmd-buf!" [ {cmd-buffer} @ + c! ] define
+
+"clear-cmd-line" [
+  0 begin dup 79 < while
+    32 black-on-white over 24 screen-char
+  1 + repeat drop
+] define
+
+"draw-cmd-char" [
+  black-on-white over 1 + 24 screen-char
+] define
+
+"enter-command" [
+  2 {editor-mode} !
+  0 {cmd-pos} !
+  clear-cmd-line
+  58 black-on-white 0 24 screen-char
+  1 24 screen-set
+] define
+
+"exit-command" [
+  0 {editor-mode} !
+  status-line
+  move-cursor
 ] define
 
 "buf-addr" [ {text-buffer} @ + ] define
@@ -280,11 +314,91 @@
 "do-save" [ save-file 83 status-color 22 24 screen-char move-cursor ] define
 "do-load" [ load-file redraw-all 76 status-color 22 24 screen-char move-cursor ] define
 
+"cmd-add-char" [
+  dup {cmd-pos} @ cmd-buf!
+  {cmd-pos} @ draw-cmd-char
+  {cmd-pos} @ 1 + {cmd-pos} !
+  {cmd-pos} @ 1 + 24 screen-set
+] define
+
+"cmd-backspace" [
+  {cmd-pos} @ 0 > if
+    {cmd-pos} @ 1 - {cmd-pos} !
+    32 {cmd-pos} @ draw-cmd-char
+    {cmd-pos} @ 1 + 24 screen-set
+  then
+] define
+
+"make-string-from-cmd" [
+  {cmd-pos} @ 1 - 17 + allot
+  dup 1 swap !
+  {cmd-pos} @ 1 - over 8 + !
+  {cmd-buffer} @ 1 +
+  over 16 +
+  {cmd-pos} @ 1 -
+  0 begin dup 3 pick < while
+    4 pick over + c@
+    3 pick 2 pick + c!
+    1 +
+  repeat drop
+  swap drop swap drop
+  0 over 16 + {cmd-pos} @ 1 - + c!
+] define
+
+"exec-cmd-w" [
+  {cmd-pos} @ 1 > if
+    make-string-from-cmd {filename} !
+  then
+  {filename} @ 0 <> if
+    find-file 0 = if create-file then
+    save-file
+  then
+  exit-command
+] define
+
+"exec-cmd-q" [
+  0
+] define
+
+"exec-cmd-wq" [
+  {filename} @ 0 <> if
+    find-file 0 = if create-file then
+    save-file
+  then
+  0
+] define
+
+"exec-command" [
+  0 {cmd-pos} @ cmd-buf!
+  0 cmd-buf@ 119 = if
+    1 cmd-buf@ 113 = if
+      exec-cmd-wq
+    else
+      exec-cmd-w 1
+    then
+  else 0 cmd-buf@ 113 = if
+    exec-cmd-q
+  else
+    exit-command 1
+  then then
+] define
+
+"handle-command" [
+  dup key-escape = if drop exit-command 1
+  else dup 10 = if drop exec-command
+  else dup 127 = if drop cmd-backspace 1
+  else dup 8 = if drop cmd-backspace 1
+  else dup 32 >= over 126 <= and if cmd-add-char 1
+  else drop 1
+  then then then then then
+] define
+
 "handle-normal" [
   dup 113 = if drop 0
   else dup 105 = if drop enter-insert 1
   else dup 115 = if drop do-save 1
   else dup 111 = if drop do-load 1
+  else dup 58 = if drop enter-command 1
   else dup 104 = if drop editor-left 1
   else dup 108 = if drop editor-right 1
   else dup 106 = if drop editor-down 1
@@ -294,10 +408,17 @@
   else dup key-up = if drop editor-up 1
   else dup key-down = if drop editor-down 1
   else drop 1
-  then then then then then then then then then then then then
+  then then then then then then then then then then then then then
 ] define
 
-"editor-loop" [ begin key {editor-mode} @ if handle-insert 1 else handle-normal then 0 = until ] define
+"dispatch-mode" [
+  {editor-mode} @ 0 = if handle-normal
+  else {editor-mode} @ 1 = if handle-insert 1
+  else handle-command
+  then then
+] define
+
+"editor-loop" [ begin key dispatch-mode 0 = until ] define
 
 "try-load" [
   {filename} @ dup 0 <> if
@@ -325,5 +446,6 @@
 "editor" [
   {filename} !
   init-dir-buffer
+  init-cmd-buffer
   editor-start
 ] define
