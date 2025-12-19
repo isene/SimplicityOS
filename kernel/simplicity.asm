@@ -3723,7 +3723,7 @@ word_drop:
     sub r15, 8
     cmp r15, data_stack
     jle .drop_empty
-    mov r14, [r15 - 8]
+    mov r14, [r15]              ; After sub, [r15] is old second = new TOS
     ret
 .drop_empty:
     mov r15, data_stack
@@ -4651,7 +4651,7 @@ word_screen_scroll:
     sub r15, 8
     cmp r15, data_stack
     jle .scr_empty
-    mov r14, [r15-8]
+    mov r14, [r15]              ; After sub, [r15] is old second = new TOS
     ret
 .scr_empty:
     mov r15, data_stack
@@ -6338,7 +6338,7 @@ word_load:
     ; Get app name string from TOS
     mov r12, r14                ; r12 = STRING object address
     sub r15, 8
-    mov r14, [r15-8]            ; Pop, get new TOS
+    mov r14, [r15]              ; Pop, get new TOS (after sub, [r15] = old second)
 
     ; Validate it's a string object
     mov rax, [r12]              ; Get type header

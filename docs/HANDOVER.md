@@ -13,41 +13,35 @@
 ### Fixed Issues
 1. **Buffer overflow** - text-buffer was 1920 bytes but load-file reads 2048 bytes. Fixed by allocating 2048 bytes.
 2. **Loop bug workaround** - All begin/while/repeat loops in file operations unrolled to avoid kernel bug.
+3. **Kernel word_drop bug** - Fixed `[r15-8]` to `[r15]` after `sub r15, 8` in word_drop, screen scroll, and app load functions.
 
-## Remaining Issue: Kernel begin/while/repeat Bug
+## Kernel Loop Bug Fix (2025-12-19)
 
-There is a **critical bug in the kernel's begin/while/repeat loop construct** when the loop body contains more than minimal code.
+### Root Cause Found
+The kernel had a bug in `word_drop` and several other places where after `sub r15, 8`, the code incorrectly used `mov r14, [r15-8]` instead of `mov r14, [r15]`.
 
-### Evidence
-- Empty loop `0 begin dup 16 < while 1 + repeat drop` works
-- Adding ANY code like `dup drop` causes freeze after 1-2 iterations
-- Affects all complex loops in Forth code
+### Stack Model
+- R14 = TOS (cached top of stack)
+- R15 = pointer to next free slot (one past last stored element)
+- After `sub r15, 8`, the old second-on-stack is at `[r15]`, NOT `[r15-8]`
 
-### Workaround Applied
-All file-related loops rewritten using **loop unrolling**:
+### Affected Functions Fixed
+1. `word_drop` (line 3726) - Core drop operation
+2. `.scroll_done` (line 4654) - Screen scroll cleanup
+3. App loading (line 6341) - Loading apps from disk
+
+### Why Loops Broke
+When a loop contained `drop` (directly or implicitly via other operations), `word_drop` would corrupt R14 with garbage from `[r15-8]` instead of the correct value at `[r15]`. This caused:
+- Incorrect loop counters
+- Garbage comparison values
+- Infinite loops or premature exits
+
+### Testing
+The fix should allow begin/while/repeat loops with complex bodies (including `dup drop`) to work correctly. Test with:
 ```forth
-"find-one" [ ... check single entry ... ] define
-"find-file" [
-  0 {find-i} ! find-one
-  1 {find-i} ! find-one
-  ... (16 times total)
-] define
+0 begin dup 16 < while dup drop 1 + repeat drop .s
 ```
-
-Unrolled loops:
-- `find-file` - directory search (16 entries)
-- `name-match` - string comparison (16 chars)
-- `copy-name-to-entry` - filename copy (16 chars)
-- `create-file` - find empty entry (16 entries)
-- `next-free-sector` - find max sector (16 entries)
-- `make-string-from-cmd` - copy command (16 chars)
-- `draw-filename` - display filename (12 chars)
-
-### Next Step: Debug Kernel Loop
-The kernel's begin/while/repeat implementation in `kernel/simplicity.asm` needs investigation. Look for:
-- Stack corruption during loop iteration
-- Incorrect jump target calculation
-- Register clobbering in complex loop bodies
+Expected: Empty stack (loop runs 0-15, drops result)
 
 ## File Structure
 
