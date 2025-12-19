@@ -1,12 +1,12 @@
 ( Core Words - Extended RPN definitions loaded at boot )
 
-( Word listing commands )
+( Word listing commands - alphabetically sorted )
 "words-kernel" [
-  "+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr ~ ? words execute len type array at put type-new type-name type-set type-name? screen-char screen-clear screen-scroll screen-set key key? key-up key-down key-left key-right key-escape if then else begin until while repeat again app-enter app-exit disk-read disk-write save restore info remove define sort allot load clstk varcount"
+  "! * + - . .s / 0= < <= <> = > >= ? @ again allot and app-enter app-exit array at begin c! c@ clstk cr define disk-read disk-write drop dup else emit execute if info key key-down key-escape key-left key-right key-up key? len load mod not or over put remove repeat restore rot save screen-char screen-clear screen-scroll screen-set sort swap then type type-name type-name? type-new type-set until varcount while words xor ~"
 ] define
 
 "words-core" [
-  "words-kernel words-core words-user nip tuck 2dup 2drop 2swap abs negate min max within"
+  "2drop 2dup 2swap abs max min negate nip tuck within words-core words-kernel words-user"
 ] define
 
 "words-user" [

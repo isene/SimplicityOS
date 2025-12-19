@@ -7575,6 +7575,12 @@ load_apps:
     push r12
     push r13
 
+    ; Load core (first - provides utility words for other apps)
+    mov rsi, serial_loading_core
+    call serial_print
+    mov rsi, app_name_core
+    call load_app_by_cstring
+
     ; Load hello
     mov rsi, serial_loading_hello
     call serial_print
@@ -7609,6 +7615,7 @@ load_apps:
     ret
 
 ; App names for boot loading
+app_name_core: db 'core', 0
 app_name_editor: db 'editor', 0
 app_name_invaders: db 'invaders', 0
 app_name_hello: db 'hello', 0
@@ -7734,6 +7741,7 @@ load_app_by_cstring:
     pop rbx
     ret
 
+serial_loading_core: db 'Loading core...', 13, 10, 0
 serial_loading_hello: db 'Loading hello...', 13, 10, 0
 serial_loading_editor: db 'Loading editor...', 13, 10, 0
 serial_loading_invaders: db 'Loading invaders...', 13, 10, 0
