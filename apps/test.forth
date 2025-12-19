@@ -10,3 +10,6 @@
 "test-right" [ show-xy editor-right show-xy ] define
 "set-x-5" [ 5 {editor-x} ! ] define
 "test-shared" [ show-xy set-x-5 editor-right show-xy ] define
+"loop2" [ 0 begin dup 3 < while 1 + repeat ] define
+"loop3" [ 0 begin dup 3 < while dup drop 1 + repeat ] define
+"loop16" [ 0 begin dup 16 < while dup drop 1 + repeat drop ] define
