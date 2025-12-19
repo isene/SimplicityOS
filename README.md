@@ -7,219 +7,215 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.17-brightgreen.svg)](CHANGELOG.md)
-[![Size](https://img.shields.io/badge/size-1.3KB-red.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.18-brightgreen.svg)](CHANGELOG.md)
 
-Bare-metal x86_64 operating system built on Forth principles.
+**Bare-metal x86_64 operating system built on pure RPN principles.**
 
-**Blog post**: [Building a 64-bit OS from Scratch with Claude Code](https://isene.org/2025/11/SimplicityOS.html)
-**Development narrative**: [MakingAnOS.md](MakingAnOS.md) - Complete session transcript
+Everything is a WORD. Hardware is directly composable.
+
+[Blog Post](https://isene.org/2025/11/SimplicityOS.html) |
+[Development Narrative](MakingAnOS.md) |
+[Word Reference](docs/WORDS.md)
 
 </div>
-
-## Philosophy
-
-Everything is a WORD. Hardware is directly composable via stack-based interface.
 
 ## Quick Start
 
 ```bash
-# Build the OS
-make
+make        # Build the OS
+make run    # Run in QEMU (requires QEMU installed)
+make debug  # Run with GDB debugging
+```
 
-# Run in QEMU
-make run
+## Philosophy
 
-# Debug with GDB
-make debug
+Simplicity OS is built on three tiers of words:
+
+1. **Kernel Words** - Written in x86_64 assembly, provide core primitives
+2. **Core Words** - Written in RPN, extend the language
+3. **User Words** - Applications and user-defined words
+
+All operations use Reverse Polish Notation (RPN):
+```forth
+> 3 4 + .
+7 ok
+
+> "Hello World" .
+Hello World ok
+```
+
+## Examples
+
+### Stack Operations
+```forth
+> 5 dup .s
+<2> 5 5 ok
+
+> drop .s
+<1> 5 ok
+
+> 3 swap .s
+<2> 3 5 ok
+
+> + .
+8 ok
+```
+
+### Defining New Words
+```forth
+> "square" [ dup * ] define
+ok
+
+> 7 square .
+49 ok
+
+> "cube" [ dup square * ] define
+ok
+
+> 3 cube .
+27 ok
+```
+
+### Variables
+```forth
+> 0 [counter] !
+ok
+
+> [counter] @ .
+0 ok
+
+> 42 [counter] !
+ok
+
+> [counter] @ .
+42 ok
+```
+
+### Control Flow
+```forth
+> "abs" [ dup 0 < if 0 swap - then ] define
+ok
+
+> -5 abs .
+5 ok
+
+> "countdown" [ begin dup . cr 1 - dup 0 = until drop ] define
+ok
+
+> 5 countdown
+5
+4
+3
+2
+1
+ok
+```
+
+### Arrays and Types
+```forth
+> { 10 20 30 }
+ok
+
+> len .
+3 ok
+
+> 1 at .
+20 ok
+
+> type-new "point" swap type-name
+ok
+
+> "point" [ { rot rot } 4 type-set ] define
+ok
+
+> 100 200 point .
+[point: 100 200 ] ok
+```
+
+### Built-in Editor
+
+Launch the vim-style editor:
+```forth
+> 0 editor           ( new empty buffer )
+> "myfile" editor    ( load existing file )
+```
+
+**Editor Commands:**
+- **Normal mode**: `h/j/k/l` or arrows to move, `i` for insert, `:` for command
+- **Insert mode**: Type text, `Ctrl+C` or `ESC` returns to normal
+- **Command mode**: `:w filename` save, `:q` quit, `:wq` save and quit
+
+### Disk Operations
+```forth
+> 512 allot [mybuf] !
+ok
+
+> 100 [mybuf] @ disk-read    ( read sector 100 )
+ok
+
+> [mybuf] @ 100 disk-write   ( write to sector 100 )
+ok
+```
+
+## Word Categories
+
+See [docs/WORDS.md](docs/WORDS.md) for complete reference.
+
+### Kernel Words (Assembly)
+Core primitives: `+ - * / mod dup drop swap . .s @ ! if then else begin while repeat`
+
+### Core Words (RPN)
+Extended operations loaded at boot time.
+
+### User Words (Apps)
+Applications like `editor`, `hello`, `invaders`.
+
+## Architecture
+
+```
+Kernel Words (Assembly)     <- Hardware interface, stack ops, control flow
+        |
+Core Words (RPN)            <- Higher-level operations
+        |
+User Words (Apps)           <- Applications, user definitions
+```
+
+**Memory Model:**
+- Heap starts at 2MB, grows upward
+- Stack uses R14 (TOS) + R15 (stack pointer)
+- Dictionary uses linked list
+
+**Type System:**
+| Type | Value | Description |
+|------|-------|-------------|
+| INT | 0 | Immediate integers |
+| STRING | 1 | Null-terminated text |
+| REF | 2 | Word reference (execution token) |
+| ARRAY | 3 | Counted array of values |
+| USER | 4+ | User-defined types |
+
+## Project Structure
+
+```
+/boot      - Bootloader (512 bytes) and stage2
+/kernel    - x86_64 assembly kernel (~56KB)
+/apps      - Applications in RPN (editor, games)
+/tools     - Build utilities
+/docs      - Technical documentation
 ```
 
 ## Requirements
 
 - NASM (assembler)
 - QEMU (emulator)
-- GCC/LD (linker)
-- Make
-
-## Project Structure
-
-```
-/boot      - Bootloader and early initialization
-/kernel    - Forth kernel core
-/drivers   - Hardware drivers as Forth WORDs
-/stdlib    - Standard Forth word library
-/tools     - Build and development utilities
-/docs      - Technical documentation
-```
-
-## Current Status
-
-**Complete Interactive Forth OS**
-
-- Fully interactive Forth shell
-- PS/2 keyboard with shift support
-- **Colon definitions** - Define new words, including nested
-- **Variables** - Allocated storage
-- **Comments** - ( text ) for documentation
-- **Strings** - "text" auto-prints, works in definitions
-- **Introspection** - words, see, forget
-- **Arrays** - `{ 1 2 3 }` literal syntax with nested support
-- **Type introspection** - `type` and `len` words
-- **User-defined types** - Build custom types from primitives
-- **Screen control** - Direct VGA manipulation for apps
-- **Keyboard control** - Arrow keys, Ctrl combos, non-blocking input
-- **Control flow** - if/then/else, begin/until/while/repeat
-- **Comparison & logic** - = < > <> <= >= 0= and or xor not
-- **App isolation** - Isolated stack context for apps (app-enter/exit)
-- **Built-in editor** - `ed` launches vim-like text editor
-- **Built-in words**: + - * / mod = < > . .s dup drop swap rot over @ ! emit cr if then else begin until while repeat again and or xor not screen-* key-* app-* ed
-- Dictionary with linked list
-- Case-insensitive
-- ~11KB total
-
-**Pure Data Architecture - Only `.` Prints:**
-```forth
-> "Test"
-ok (STRING object pushed, no output)
-> .
-Test ok (. detects STRING and prints)
-
-> 2 3 +
-ok (5 pushed as immediate)
-> .
-5 ok (. prints number)
-
-> : square dup * ;
-ok
-> : square4 square square ;
-ok (nested definitions)
-> 2 square4 .
-256 ok (2^8)
-
-> ~square ?
-ok (pushes STRING "(colon)")
-> .
-(colon) ok (. prints it)
-
-> variable x
-ok
-> 100 x ! x @ .
-100 ok
-
-> "Hello" "World" . .
-WorldHello ok (LIFO stack order)
-
-> words
-ok (pushes STRING list)
-> .
-square4 square x + - * / ... ok
-
-> { 1 2 3 }
-ok (ARRAY object pushed)
-> len .
-3 ok
-> type .
-3 ok (type 3 = ARRAY)
-
-> { "hello" { 1 2 } 42 }
-ok (nested array with string, array, int)
-> .s
-<1> [ARRAY:3] ok (type-aware stack display)
-
-> type-new
-ok (allocates type 4)
-> .
-4 ok
-
-> "point" 4 type-name
-ok (names type 4 as "point")
-
-> { 10 20 } 4 type-set
-ok (creates point from array)
-> .
-[point: 10 20 ] ok (displays with type name)
-
-> 4 type-name? .
-point ok (retrieves type name)
-```
-
-**Building a Complete Type System:**
-```forth
-( Define a 2D point type )
-> type-new
-ok
-> .
-4 ok
-> "point" 4 type-name
-ok
-
-( Create point constructor )
-> : point { rot rot } 4 type-set ;
-ok
-
-( Use it )
-> 100 200 point
-ok
-> .
-[point: 100 200 ] ok
-
-( Define a rectangle using two points )
-> type-new
-ok
-> "rect" 5 type-name
-ok
-> : rect { rot rot } 5 type-set ;
-ok
-
-( Create rectangle from two points )
-> 0 0 point 100 50 point rect
-ok
-> .
-[rect: . . ] ok (contains two point objects)
-```
-
-**App Stack Isolation:**
-```forth
-> 1 2 3 .s
-<3> 1 2 3 ok (main stack has 3 items)
-
-> app-enter
-ok (save main stack, start fresh app stack)
-> .s
-<0> ok (app stack is empty)
-
-> 100 200 +
-ok (app does its work)
-> .s
-<1> 300 ok (app has its own stack)
-
-> app-exit
-ok (restore main stack)
-> .s
-<3> 1 2 3 ok (main stack preserved!)
-```
-
-**Built-in Editor:**
-```forth
-> ed
-```
-Launches a vim-like text editor:
-- **Normal mode**: h/j/k/l or arrows to move, `i` for insert, `q` to quit
-- **Insert mode**: Type text, ESC returns to normal mode
-- Status bar shows current mode and commands
-
-**Key Principle**: Nothing prints except `.`
-All operations push data. `.` detects type and renders.
-
-Self-modifying language with pure data semantics.
-
-See CHANGELOG.md for complete feature list.
+- GNU Make
 
 ## Documentation
 
-- `CLAUDE.md` - Project directives and conventions
-- `PLAN.md` - Implementation plan and technical decisions
-- `docs/` - Detailed technical documentation
+- [WORDS.md](docs/WORDS.md) - Complete word reference
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Technical architecture
+- [RPN-GUIDE.md](docs/RPN-GUIDE.md) - RPN programming guide
+- [CLAUDE.md](CLAUDE.md) - Development conventions
 
 ## License
 
