@@ -7,12 +7,16 @@
 0 {file-sector} !
 0 {cmd-buffer} !
 0 {cmd-pos} !
+0 {str-ptr} !
+0 {src-ptr} !
+0 {dst-ptr} !
+0 {copy-len} !
 
 "white-on-black" [ 7 ] define
 "black-on-white" [ 112 ] define
 "white-on-green" [ 39 ] define
 
-"status-color" [ {editor-mode} @ if white-on-green else black-on-white then ] define
+"status-color" [ {editor-mode} @ 1 = if white-on-green else black-on-white then ] define
 
 "init-buffer" [
   {text-buffer} @ 0 = if 1920 allot {text-buffer} ! then
@@ -30,30 +34,6 @@
 
 "cmd-buf@" [ {cmd-buffer} @ + c@ ] define
 "cmd-buf!" [ {cmd-buffer} @ + c! ] define
-
-"clear-cmd-line" [
-  0 begin dup 79 < while
-    32 black-on-white over 24 screen-char
-  1 + repeat drop
-] define
-
-"draw-cmd-char" [
-  black-on-white over 1 + 24 screen-char
-] define
-
-"enter-command" [
-  2 {editor-mode} !
-  0 {cmd-pos} !
-  clear-cmd-line
-  58 black-on-white 0 24 screen-char
-  1 24 screen-set
-] define
-
-"exit-command" [
-  0 {editor-mode} !
-  status-line
-  move-cursor
-] define
 
 "buf-addr" [ {text-buffer} @ + ] define
 "buf@" [ buf-addr c@ ] define
@@ -107,22 +87,34 @@
   {cmp-a} @ 0 =
 ] define
 
+0 {find-i} !
+"find-one" [
+  {find-i} @ entry-name c@ 0 <> if
+    {find-i} @ name-match if
+      {find-i} @ get-entry-sector {file-sector} !
+    then
+  then
+] define
+
 "find-file" [
   read-dir
   0 {file-sector} !
-  0 begin dup 16 < while
-    dup entry-name c@ dup 0 <> if
-      69 7 77 0 screen-char
-      drop
-      dup name-match if
-        dup get-entry-sector {file-sector} !
-        70 7 78 0 screen-char
-      then
-    else
-      drop
-    then
-    1 +
-  repeat drop
+  0 {find-i} ! find-one
+  1 {find-i} ! find-one
+  2 {find-i} ! find-one
+  3 {find-i} ! find-one
+  4 {find-i} ! find-one
+  5 {find-i} ! find-one
+  6 {find-i} ! find-one
+  7 {find-i} ! find-one
+  8 {find-i} ! find-one
+  9 {find-i} ! find-one
+  10 {find-i} ! find-one
+  11 {find-i} ! find-one
+  12 {find-i} ! find-one
+  13 {find-i} ! find-one
+  14 {find-i} ! find-one
+  15 {find-i} ! find-one
   {file-sector} @
 ] define
 
@@ -314,6 +306,21 @@
 "do-save" [ save-file 83 status-color 22 24 screen-char move-cursor ] define
 "do-load" [ load-file redraw-all 76 status-color 22 24 screen-char move-cursor ] define
 
+"draw-cmd-char" [ status-color swap 1 + 24 screen-char ] define
+
+"enter-command" [
+  2 {editor-mode} !
+  clear-status
+  58 status-color 0 24 screen-char
+  1 24 screen-set
+] define
+
+"exit-command" [
+  0 {editor-mode} !
+  0 {cmd-pos} !
+  status-line
+] define
+
 "cmd-add-char" [
   dup {cmd-pos} @ cmd-buf!
   {cmd-pos} @ draw-cmd-char
@@ -330,27 +337,27 @@
 ] define
 
 "make-string-from-cmd" [
-  {cmd-pos} @ 1 - 17 + allot
-  dup 1 swap !
-  {cmd-pos} @ 1 - over 8 + !
-  {cmd-buffer} @ 1 +
-  over 16 +
-  {cmd-pos} @ 1 -
-  0 begin dup 3 pick < while
-    4 pick over + c@
-    3 pick 2 pick + c!
+  {cmd-pos} @ 2 - {copy-len} !
+  {copy-len} @ 17 + allot {str-ptr} !
+  1 {str-ptr} @ !
+  {copy-len} @ {str-ptr} @ 8 + !
+  {cmd-buffer} @ 2 + {src-ptr} !
+  {str-ptr} @ 16 + {dst-ptr} !
+  0 begin dup {copy-len} @ < while
+    dup {src-ptr} @ + c@
+    over {dst-ptr} @ + c!
     1 +
   repeat drop
-  swap drop swap drop
-  0 over 16 + {cmd-pos} @ 1 - + c!
+  0 {dst-ptr} @ {copy-len} @ + c!
+  {str-ptr} @
 ] define
 
 "exec-cmd-w" [
-  {cmd-pos} @ 1 > if
+  {cmd-pos} @ 2 > if
     make-string-from-cmd {filename} !
   then
   {filename} @ 0 <> if
-    find-file 0 = if create-file then
+    find-file 0 = if create-file drop then
     save-file
   then
   exit-command
@@ -362,7 +369,7 @@
 
 "exec-cmd-wq" [
   {filename} @ 0 <> if
-    find-file 0 = if create-file then
+    find-file 0 = if create-file drop then
     save-file
   then
   0
