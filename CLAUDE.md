@@ -132,6 +132,37 @@ KEYBOARD-READ   ( -- scancode )
 - Integration test: Do existing WORDs still work?
 - Manual verification required before marking complete
 
+## VNC Self-Testing (for Claude)
+When debugging requires iterative testing, Claude can use VNC:
+
+```bash
+# Start QEMU with VNC (headless)
+qemu-system-x86_64 -drive file=build/simplicity.img,format=raw -vnc :1 -daemonize
+
+# Capture screenshot
+vncdotool -s localhost:1 capture /tmp/screenshot.png
+
+# Send keystrokes
+vncdotool -s localhost:1 type "0 editor" key enter
+
+# Send special keys
+vncdotool -s localhost:1 key ctrl-c    # Exit insert mode
+vncdotool -s localhost:1 key i         # Single key
+
+# Stop QEMU
+pkill -f qemu
+```
+
+**VNC Limitations:**
+- Quote character `"` is converted to `'` - can't test string literals
+- Use Ctrl+C instead of Escape for mode switching
+- Colon `:` may not work - use `type ":"` or test `s` key for save
+
+**When to use VNC testing:**
+- Iterative debugging with many rebuild-test cycles
+- When user requests autonomous testing
+- Simple keyboard sequences without string literals
+
 ## Code Standards
 - Assembly: NASM syntax, well-commented
 - RPN: Lowercase words, stack effects in comments

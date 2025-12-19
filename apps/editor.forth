@@ -19,7 +19,7 @@
 "status-color" [ {editor-mode} @ 1 = if white-on-green else black-on-white then ] define
 
 "init-buffer" [
-  {text-buffer} @ 0 = if 1920 allot {text-buffer} ! then
+  {text-buffer} @ 0 = if 2048 allot {text-buffer} ! then
   0 begin dup 1920 < while 32 over {text-buffer} @ + c! 1 + repeat drop
 ] define
 
@@ -70,20 +70,39 @@
 0 {cmp-a} !
 0 {cmp-b} !
 0 {match-entry} !
+0 {cmp-i} !
+
+"cmp-one" [
+  {cmp-a} @ 0 = if
+    {match-entry} @ entry-name {cmp-i} @ + c@
+    dup 0 = if
+      drop
+    else
+      {filename} @ 16 + {cmp-i} @ + c@
+      <> if 1 {cmp-a} ! then
+    then
+  then
+] define
 
 "name-match" [
   {match-entry} !
   0 {cmp-a} !
-  0 begin dup 16 < {cmp-a} @ 0 = and while
-    {match-entry} @ entry-name over + c@
-    dup 0 = if
-      drop drop 16
-    else
-      over {filename} @ 16 + + c@
-      <> if 1 {cmp-a} ! then
-      1 +
-    then
-  repeat drop
+  0 {cmp-i} ! cmp-one
+  1 {cmp-i} ! cmp-one
+  2 {cmp-i} ! cmp-one
+  3 {cmp-i} ! cmp-one
+  4 {cmp-i} ! cmp-one
+  5 {cmp-i} ! cmp-one
+  6 {cmp-i} ! cmp-one
+  7 {cmp-i} ! cmp-one
+  8 {cmp-i} ! cmp-one
+  9 {cmp-i} ! cmp-one
+  10 {cmp-i} ! cmp-one
+  11 {cmp-i} ! cmp-one
+  12 {cmp-i} ! cmp-one
+  13 {cmp-i} ! cmp-one
+  14 {cmp-i} ! cmp-one
+  15 {cmp-i} ! cmp-one
   {cmp-a} @ 0 =
 ] define
 
@@ -118,56 +137,112 @@
   {file-sector} @
 ] define
 
+0 {nfs-max} !
+"check-entry-sector" [
+  dup entry-name c@ 0 <> if
+    get-entry-sector 4 +
+    dup {nfs-max} @ > if {nfs-max} ! else drop then
+  else
+    drop
+  then
+] define
+
 "next-free-sector" [
-  300
-  0 begin dup 16 < while
-    dup entry-name c@ 0 <> if
-      dup get-entry-sector 4 +
-      rot over over < if drop else swap drop then
-      swap
-    then
-    1 +
-  repeat drop
+  300 {nfs-max} !
+  0 check-entry-sector
+  1 check-entry-sector
+  2 check-entry-sector
+  3 check-entry-sector
+  4 check-entry-sector
+  5 check-entry-sector
+  6 check-entry-sector
+  7 check-entry-sector
+  8 check-entry-sector
+  9 check-entry-sector
+  10 check-entry-sector
+  11 check-entry-sector
+  12 check-entry-sector
+  13 check-entry-sector
+  14 check-entry-sector
+  15 check-entry-sector
+  {nfs-max} @
 ] define
 
 0 {copy-src} !
 0 {copy-dst} !
 
+0 {copy-i} !
+"copy-one-char" [
+  {copy-i} @ {copy-src} @ + c@
+  {copy-i} @ {copy-dst} @ + c!
+] define
+
 "copy-name-to-entry" [
   {filename} @ 16 + {copy-src} !
   entry-name {copy-dst} !
-  0 begin dup 16 < while
-    dup {copy-src} @ + c@
-    over {copy-dst} @ + c!
-    1 +
-  repeat drop
+  0 {copy-i} ! copy-one-char
+  1 {copy-i} ! copy-one-char
+  2 {copy-i} ! copy-one-char
+  3 {copy-i} ! copy-one-char
+  4 {copy-i} ! copy-one-char
+  5 {copy-i} ! copy-one-char
+  6 {copy-i} ! copy-one-char
+  7 {copy-i} ! copy-one-char
+  8 {copy-i} ! copy-one-char
+  9 {copy-i} ! copy-one-char
+  10 {copy-i} ! copy-one-char
+  11 {copy-i} ! copy-one-char
+  12 {copy-i} ! copy-one-char
+  13 {copy-i} ! copy-one-char
+  14 {copy-i} ! copy-one-char
+  15 {copy-i} ! copy-one-char
 ] define
 
 0 {create-entry} !
-"create-file" [
-  read-dir
-  67 7 2 1 screen-char
-  0 begin dup 16 < while
+0 {create-done} !
+"try-create-entry" [
+  {create-done} @ 0 = if
     dup entry-name c@ 0 = if
       {create-entry} !
       next-free-sector {create-entry} @ set-entry-sector
       {create-entry} @ copy-name-to-entry
       {create-entry} @ get-entry-sector {file-sector} !
       write-dir
-      16
+      1 {create-done} !
     else
-      1 +
+      drop
     then
-  repeat drop
+  else
+    drop
+  then
+] define
+
+"create-file" [
+  read-dir
+  0 {create-done} !
+  0 try-create-entry
+  1 try-create-entry
+  2 try-create-entry
+  3 try-create-entry
+  4 try-create-entry
+  5 try-create-entry
+  6 try-create-entry
+  7 try-create-entry
+  8 try-create-entry
+  9 try-create-entry
+  10 try-create-entry
+  11 try-create-entry
+  12 try-create-entry
+  13 try-create-entry
+  14 try-create-entry
+  15 try-create-entry
   {file-sector} @
 ] define
 
 "save-file" [
-  88 7 0 1 screen-char
   {filename} @ 0 <> if
-    83 7 1 1 screen-char
     find-file
-    0 = if 78 7 1 1 screen-char create-file drop then
+    0 = if create-file drop then
     {file-sector} @ 0 = if else
       {text-buffer} @ {file-sector} @ disk-write
       {text-buffer} @ 512 + {file-sector} @ 1 + disk-write
@@ -223,17 +298,31 @@
 
 "draw-mode" [ {editor-mode} @ if draw-insert else draw-normal then ] define
 
+0 {fn-ptr} !
+0 {fn-i} !
+"draw-fn-char" [
+  {fn-ptr} @ {fn-i} @ + c@ dup 0 <> if
+    status-color {fn-i} @ 10 + 24 screen-char
+  else
+    drop
+  then
+] define
+
 "draw-filename" [
   {filename} @ 0 <> if
-    {filename} @ 16 +
-    0 begin dup 12 < while
-      over over + c@ dup 0 <> if
-        status-color over 10 + 24 screen-char
-      else
-        drop
-      then
-      1 +
-    repeat drop drop
+    {filename} @ 16 + {fn-ptr} !
+    0 {fn-i} ! draw-fn-char
+    1 {fn-i} ! draw-fn-char
+    2 {fn-i} ! draw-fn-char
+    3 {fn-i} ! draw-fn-char
+    4 {fn-i} ! draw-fn-char
+    5 {fn-i} ! draw-fn-char
+    6 {fn-i} ! draw-fn-char
+    7 {fn-i} ! draw-fn-char
+    8 {fn-i} ! draw-fn-char
+    9 {fn-i} ! draw-fn-char
+    10 {fn-i} ! draw-fn-char
+    11 {fn-i} ! draw-fn-char
   then
 ] define
 
@@ -336,6 +425,14 @@
   then
 ] define
 
+0 {msc-i} !
+"copy-cmd-char" [
+  {msc-i} @ {copy-len} @ < if
+    {msc-i} @ {src-ptr} @ + c@
+    {msc-i} @ {dst-ptr} @ + c!
+  then
+] define
+
 "make-string-from-cmd" [
   {cmd-pos} @ 2 - {copy-len} !
   {copy-len} @ 17 + allot {str-ptr} !
@@ -343,11 +440,22 @@
   {copy-len} @ {str-ptr} @ 8 + !
   {cmd-buffer} @ 2 + {src-ptr} !
   {str-ptr} @ 16 + {dst-ptr} !
-  0 begin dup {copy-len} @ < while
-    dup {src-ptr} @ + c@
-    over {dst-ptr} @ + c!
-    1 +
-  repeat drop
+  0 {msc-i} ! copy-cmd-char
+  1 {msc-i} ! copy-cmd-char
+  2 {msc-i} ! copy-cmd-char
+  3 {msc-i} ! copy-cmd-char
+  4 {msc-i} ! copy-cmd-char
+  5 {msc-i} ! copy-cmd-char
+  6 {msc-i} ! copy-cmd-char
+  7 {msc-i} ! copy-cmd-char
+  8 {msc-i} ! copy-cmd-char
+  9 {msc-i} ! copy-cmd-char
+  10 {msc-i} ! copy-cmd-char
+  11 {msc-i} ! copy-cmd-char
+  12 {msc-i} ! copy-cmd-char
+  13 {msc-i} ! copy-cmd-char
+  14 {msc-i} ! copy-cmd-char
+  15 {msc-i} ! copy-cmd-char
   0 {dst-ptr} @ {copy-len} @ + c!
   {str-ptr} @
 ] define
@@ -428,14 +536,10 @@
 "editor-loop" [ begin key dispatch-mode 0 = until ] define
 
 "try-load" [
-  {filename} @ dup 0 <> if
-    find-file dup 0 <> if
+  {filename} @ 0 <> if
+    find-file 0 <> if
       load-file redraw-all
-    else
-      drop
     then
-  else
-    drop
   then
 ] define
 
