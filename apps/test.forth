@@ -36,3 +36,41 @@
 "t2m" [ 0 begin 1 + dup 2000000 > until . ] define
 "t3m" [ 0 begin 1 + dup 3000000 > until . ] define
 "twhile" [ 0 begin dup 5 < while 1 + repeat . ] define
+
+( Test multiple if/then in same loop - like invaders )
+"multi-if" [
+  1 {run} !
+  begin {run} @ while
+    key? {k} !
+    {k} @ 113 = if 0 {run} ! then
+    {k} @ 104 = if 72 emit then
+    {k} @ 108 = if 76 emit then
+  repeat
+] define
+
+( Test and in loop - x prints X only when no bullet )
+"test-and" [
+  0 {bf} !
+  1 {run} !
+  begin {run} @ while
+    key? {k} !
+    {k} @ 113 = if 0 {run} ! then
+    {k} @ 120 = {bf} @ 0 = and if 88 emit 1 {bf} ! then
+    {k} @ 114 = if 0 {bf} ! 82 emit then
+  repeat
+] define
+
+( Test and with screen-char )
+"test-and2" [
+  0 {bf} !
+  40 {bx} !
+  20 {by} !
+  40 {px} !
+  1 {run} !
+  begin {run} @ while
+    key? {k} !
+    {k} @ 113 = if 0 {run} ! then
+    {k} @ 120 = {bf} @ 0 = and if {px} @ {bx} ! 21 {by} ! 1 {bf} ! 124 15 {bx} @ {by} @ screen-char then
+    {k} @ 114 = if 0 {bf} ! 82 emit then
+  repeat
+] define
