@@ -1,9 +1,4 @@
-( Space Invaders - minimal test version )
-
-( Helper words for alien movement )
-"alien-right" [ {ax} @ 75 > if 0 1 - {dir} ! {ay} @ 1 + {ay} ! then ] define
-"alien-left" [ {ax} @ 5 < if 1 {dir} ! {ay} @ 1 + {ay} ! then ] define
-"alien-reset" [ {ay} @ 20 > if 3 {ay} ! 10 {ax} ! then ] define
+( Space Invaders - simplified )
 
 "invaders" [
   screen-clear
@@ -19,27 +14,31 @@
 
   begin {run} @ while
     key? {k} !
+
+    ( Quit )
     {k} @ 113 = if 0 {run} ! then
+
+    ( Right - simple version )
     {k} @ 108 = if
       32 0 {px} @ 22 screen-char
       {px} @ 1 + {px} !
       94 10 {px} @ 22 screen-char
     then
+
+    ( Left )
     {k} @ 104 = if
       32 0 {px} @ 22 screen-char
       {px} @ 1 - {px} !
       94 10 {px} @ 22 screen-char
     then
+
+    ( Tick for alien movement )
     {t} @ 1 + {t} !
     {t} @ 5000 > if
       0 {t} !
       32 0 {ax} @ {ay} @ screen-char
       {ax} @ {dir} @ + {ax} !
-      alien-right
-      alien-left
-      alien-reset
       87 14 {ax} @ {ay} @ screen-char
     then
   repeat
-  screen-clear
 ] define
