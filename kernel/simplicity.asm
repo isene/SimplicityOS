@@ -149,8 +149,11 @@ CR:
     jmp NEXT
 
 LIT:
-    lodsq
-    push rax
+    ; Push literal to data stack (R14/R15 model)
+    lodsq               ; Get literal value from [RSI]
+    mov [r15], r14      ; Save old TOS to stack memory
+    add r15, 8          ; Advance stack pointer
+    mov r14, rax        ; New value becomes TOS
     jmp NEXT
 
 BRANCH:
@@ -3537,7 +3540,7 @@ word_dot:
     ; After pop: depth decreases by 1, new TOS comes from stack
     sub r15, 8
     cmp r15, data_stack
-    jle .dot_empty
+    jl .dot_empty           ; jl not jle: R15==data_stack means valid item at [R15]
     ; Still have items - load new TOS from memory
     mov r14, [r15]          ; After sub, [r15] is old second item = new TOS
     ret
@@ -3722,7 +3725,7 @@ word_drop:
     ; Drop TOS: decrement depth, load new TOS from memory
     sub r15, 8
     cmp r15, data_stack
-    jle .drop_empty
+    jl .drop_empty              ; jl not jle: R15==data_stack means valid item at [R15]
     mov r14, [r15]              ; After sub, [r15] is old second = new TOS
     ret
 .drop_empty:
@@ -3746,7 +3749,6 @@ word_varcount:
     ret
 .vc_first:
     mov r14, [named_var_count]
-    add r15, 8
     ret
 
 word_vars:
@@ -3918,15 +3920,25 @@ word_store:
     mov rax, r14            ; Address
     sub r15, 8
     mov rbx, [r15]          ; Value
-    mov [rax], rbx
+    mov [rax], rbx          ; Store value at address
+    ; Pop second argument, check for underflow
     sub r15, 8
+    cmp r15, data_stack
+    jl .store_empty
     mov r14, [r15]          ; New TOS
+    ret
+.store_empty:
+    mov r15, data_stack
+    xor r14, r14
     ret
 
 .store_invalid:
-    ; Return error, clean stack
-    sub r15, 8
-    sub r15, 8
+    ; Return error, clean stack (pop both args with underflow check)
+    sub r15, 16             ; Pop both at once
+    cmp r15, data_stack
+    jge .store_inv_ok
+    mov r15, data_stack
+.store_inv_ok:
     push rsi
     mov rsi, str_bad_addr
     call create_string_from_cstr
@@ -4028,10 +4040,19 @@ word_execute:
     ; Execute code reference from TOS
     mov rax, r14            ; Get reference from TOS
 
-    ; Load new TOS
+    ; Load new TOS (with underflow check)
     sub r15, 8
+    cmp r15, data_stack
+    jl .exec_underflow
     mov r14, [r15]
+    jmp .exec_validate
 
+.exec_underflow:
+    ; Stack underflow - reset to empty
+    mov r15, data_stack
+    xor r14, r14
+
+.exec_validate:
     ; Validate reference (check for null/invalid)
     test rax, rax
     jz .invalid_ref
@@ -4069,7 +4090,6 @@ word_execute:
     jmp .exec_loop
 .lit_first:
     mov r14, rax
-    add r15, 8
     jmp .exec_loop
 
 .check_branch:
@@ -4299,7 +4319,6 @@ word_type_new:
     jmp .tn_done
 .tn_first:
     mov r14, rax
-    add r15, 8
 .tn_done:
     ; Increment for next allocation
     inc qword [next_type_tag]
@@ -4509,8 +4528,8 @@ word_screen_set:
     ; Pop both, load new TOS
     sub r15, 8
     cmp r15, data_stack
-    jle .ss_empty
-    mov r14, [r15]          ; Fixed: was [r15-8]
+    jl .ss_empty            ; jl not jle: R15==data_stack means valid item at [R15]
+    mov r14, [r15]
     ret
 .ss_empty:
     mov r15, data_stack
@@ -4541,8 +4560,8 @@ word_screen_char:
     ; Pop all four, load new TOS
     sub r15, 8
     cmp r15, data_stack
-    jle .sc_empty
-    mov r14, [r15]          ; Fixed: was [r15-8]
+    jl .sc_empty            ; jl not jle: R15==data_stack means valid item at [R15]
+    mov r14, [r15]
     ret
 .sc_empty:
     mov r15, data_stack
@@ -4550,21 +4569,12 @@ word_screen_char:
     ret
 
 word_screen_clear:
-    ; SCREEN-CLEAR - Clear screen with color ( color -- )
-    mov rcx, r14            ; Color attribute
+    ; SCREEN-CLEAR - Clear screen ( -- )
+    ; Uses black background (color 0)
 
-    ; Clear all 80x25 characters
+    ; Clear all 80x25 characters with spaces on black
     mov rdi, 0xB8000
-    mov rax, rcx
-    shl rax, 8              ; Color in high byte
-    or rax, 0x20            ; Space in low byte
-    mov rdx, rax
-    shl rdx, 16
-    or rax, rdx             ; Two chars at once
-    shl rdx, 16
-    or rax, rdx
-    shl rdx, 16
-    or rax, rdx             ; Four chars in RAX
+    mov rax, 0x0020002000200020  ; 4 spaces with black background (attr 0)
 
     mov rcx, 500            ; 2000 chars / 4 = 500 qwords
 .clear_loop:
@@ -4577,11 +4587,7 @@ word_screen_clear:
     mov qword [cursor], 0xB8000
     call update_hw_cursor
 
-    ; Pop color, load new TOS
-    sub r15, 8
-    cmp r15, data_stack
-    jle .scl_empty
-    mov r14, [r15]          ; Fixed: was [r15-8]
+    ; No argument to pop - just return
     ret
 .scl_empty:
     mov r15, data_stack
@@ -4650,8 +4656,8 @@ word_screen_scroll:
     ; Pop n, load new TOS
     sub r15, 8
     cmp r15, data_stack
-    jle .scr_empty
-    mov r14, [r15]              ; After sub, [r15] is old second = new TOS
+    jl .scr_empty               ; jl not jle: R15==data_stack means valid item at [R15]
+    mov r14, [r15]
     ret
 .scr_empty:
     mov r15, data_stack
@@ -4706,7 +4712,7 @@ word_screen_line_shift:
     ; Pop both args, load new TOS
     sub r15, 8
     cmp r15, data_stack
-    jle .sls_empty
+    jl .sls_empty               ; jl not jle: R15==data_stack means valid item at [R15]
     mov r14, [r15]
     ret
 .sls_empty:
@@ -4727,7 +4733,7 @@ word_key:
     ret
 .wk_first:
     mov r14, rax
-    add r15, 8
+    ; Don't advance r15 - first value goes in R14 only
     ret
 
 word_key_check:
@@ -4743,7 +4749,7 @@ word_key_check:
     ret
 .kc_first:
     mov r14, rax
-    add r15, 8
+    ; Don't advance r15 - first value goes in R14 only
     ret
 
 word_key_escape:
@@ -4756,7 +4762,6 @@ word_key_escape:
     ret
 .ke_first:
     mov r14, KEY_ESCAPE
-    add r15, 8
     ret
 
 word_key_up:
@@ -4769,7 +4774,6 @@ word_key_up:
     ret
 .ku_first:
     mov r14, KEY_UP
-    add r15, 8
     ret
 
 word_key_down:
@@ -4782,7 +4786,6 @@ word_key_down:
     ret
 .kd_first:
     mov r14, KEY_DOWN
-    add r15, 8
     ret
 
 word_key_left:
@@ -4795,7 +4798,6 @@ word_key_left:
     ret
 .kl_first:
     mov r14, KEY_LEFT
-    add r15, 8
     ret
 
 word_key_right:
@@ -4808,7 +4810,6 @@ word_key_right:
     ret
 .kr_first:
     mov r14, KEY_RIGHT
-    add r15, 8
     ret
 
 word_key_delete:
@@ -4821,7 +4822,6 @@ word_key_delete:
     ret
 .kdel_first:
     mov r14, KEY_DELETE
-    add r15, 8
     ret
 
 word_key_backspace:
@@ -4834,7 +4834,6 @@ word_key_backspace:
     ret
 .kbs_first:
     mov r14, 8
-    add r15, 8
     ret
 
 ; Control flow words - IMMEDIATE (execute during compilation)
@@ -5078,7 +5077,6 @@ word_app_stack:
     ret
 .as_first:
     mov r14, rax
-    add r15, 8
     ret
 
 word_app_depth:
@@ -5105,7 +5103,6 @@ word_app_depth:
     ret
 .ad_first:
     mov r14, rbx
-    add r15, 8
     ret
 
 str_not_in_app: db '(not in app)', 0
@@ -6726,20 +6723,18 @@ word_define:
     push rcx
     push rsi
 
-    ; Check if literal: negative OR < 0x10000 OR >= 0x200000 (heap)
-    test rax, rax
-    js .define_is_literal       ; Negative number
-    cmp rax, 0x10000
-    jb .define_is_literal       ; Small positive number
-    cmp rax, 0x200000
-    jae .define_is_literal      ; Heap object (string/float/array)
+    ; Check if tagged literal (bit 63 set during array collection for positive numbers)
+    ; Must check this FIRST since tagged numbers appear negative due to bit 63
+    bt rax, 63
+    jc .define_is_tagged_literal
 
-    ; Check if variable address (in named_vars data section)
-    cmp rax, named_vars
-    jb .define_not_var
-    cmp rax, named_vars + 8192  ; named_vars is 1024 qwords = 8KB
-    jb .define_is_literal       ; Variable address - treat as literal
-.define_not_var:
+    ; Check if naturally negative - these are literals (can't be code addresses)
+    ; Only reach here if bit 63 was NOT set, so true negatives won't exist here
+    ; (negative numbers are tagged, and we handled that above)
+
+    ; Check if heap object (>= 0x200000) - also a literal
+    cmp rax, 0x200000
+    jae .define_is_literal
 
     ; It's a code reference - check if control flow immediate
     cmp rax, word_begin
@@ -6770,6 +6765,17 @@ word_define:
     ; Execute the control flow word to generate branches
     call rax
     jmp .define_next_element
+
+.define_is_tagged_literal:
+    ; Bit 63 is set - could be tagged positive OR natural negative
+    ; Clear bit 63 and check if result is still negative
+    mov rbx, rax                ; Save original
+    btr rax, 63                 ; Clear bit 63
+    test rax, rax
+    jns .define_is_literal      ; If now positive, it was tagged - use cleared value
+    ; Still appears negative after clearing bit 63 means it was truly negative
+    mov rax, rbx                ; Restore original negative value
+    ; Fall through to wrap with LIT
 
 .define_is_literal:
     ; Wrap with LIT
@@ -7181,9 +7187,14 @@ interpret_line:
 
 .iline_number_to_array:
     ; Store number in collection buffer
+    ; Only tag positive numbers with bit 63 (negative numbers already have it set)
     push rbx
     mov rbx, [array_collect_ptr]
-    mov [rbx], rax              ; Store number
+    test rax, rax
+    js .iline_number_store      ; Skip tagging for negative numbers
+    bts rax, 63                 ; Set bit 63 to tag positive numbers as literal
+.iline_number_store:
+    mov [rbx], rax
     add rbx, 8
     mov [array_collect_ptr], rbx
     pop rbx
@@ -7278,9 +7289,11 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_var_to_array:
-    ; Store variable address in array collection buffer
+    ; Store variable address in array collection buffer with bit 63 set
+    ; define will wrap it with LIT when processing
     push rbx
     mov rbx, [array_collect_ptr]
+    bts rax, 63                 ; Set bit 63 to tag as literal
     mov [rbx], rax
     add rbx, 8
     mov [array_collect_ptr], rbx
@@ -7476,7 +7489,14 @@ exec_definition:
     lodsq                       ; Get offset into RAX
     mov rbx, r14                ; Save TOS for test
     sub r15, 8
+    cmp r15, data_stack
+    jl .exec_zbranch_empty      ; Stack empty after pop
     mov r14, [r15]              ; Pop new TOS
+    jmp .exec_zbranch_test
+.exec_zbranch_empty:
+    mov r15, data_stack         ; Reset stack pointer
+    xor r14, r14                ; TOS = 0
+.exec_zbranch_test:
     test rbx, rbx               ; Test saved TOS (after pop to preserve flags)
     jnz .exec_def_loop          ; If not zero, don't branch
     add rsi, rax                ; Branch

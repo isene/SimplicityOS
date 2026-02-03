@@ -13,3 +13,26 @@
 "loop2" [ 0 begin dup 3 < while 1 + repeat ] define
 "loop3" [ 0 begin dup 3 < while dup drop 1 + repeat ] define
 "loop16" [ 0 begin dup 16 < while dup drop 1 + repeat drop ] define
+"ktest" [ key? . ] define
+"kloop" [ 1 {run} ! begin {run} @ while key? dup 113 = if 0 {run} ! then drop repeat ] define
+
+( Test literal values to find crash boundary )
+"t100" [ 0 begin 1 + dup 100 > until . ] define
+"t1k" [ 0 begin 1 + dup 1000 > until . ] define
+"t10k" [ 0 begin 1 + dup 10000 > until . ] define
+"t50k" [ 0 begin 1 + dup 50000 > until . ] define
+"t60k" [ 0 begin 1 + dup 60000 > until . ] define
+"t65k" [ 0 begin 1 + dup 65000 > until . ] define
+"t65535" [ 0 begin 1 + dup 65535 > until . ] define
+"t65536" [ 0 begin 1 + dup 65536 > until . ] define
+"p65535" [ 65535 . ] define
+"p65536" [ 65536 . ] define
+"p65537" [ 65537 . ] define
+"p100k" [ 100000 . ] define
+"t70k" [ 0 begin 1 + dup 70000 > until . ] define
+"t100k" [ 0 begin 1 + dup 100000 > until . ] define
+"t500k" [ 0 begin 1 + dup 500000 > until . ] define
+"t1m" [ 0 begin 1 + dup 1000000 > until . ] define
+"t2m" [ 0 begin 1 + dup 2000000 > until . ] define
+"t3m" [ 0 begin 1 + dup 3000000 > until . ] define
+"twhile" [ 0 begin dup 5 < while 1 + repeat . ] define
