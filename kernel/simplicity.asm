@@ -7837,7 +7837,7 @@ array_collect_buffer: times 512 dq 0  ; Temporary buffer for array collection (5
 array_collect_ptr: dq 0         ; Pointer into collection buffer
 dict_here: dq dictionary_space  ; Next free space in dictionary
 dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)
-compile_buffer: times 256 dq 0  ; Compilation buffer
+compile_buffer: times 512 dq 0  ; Compilation buffer (512 cells)
 compile_ptr: dq compile_buffer  ; Current compilation position
 new_word_name: times 32 db 0    ; Name of word being defined
 string_pool: times 2048 db 0    ; Temporary string pool
@@ -7866,8 +7866,8 @@ named_var_count: dq 0
 
 cursor: dq 0xB8000 + 160
 
-; Dictionary space (4KB for user-defined words)
-dictionary_space: times 4096 db 0
+; Dictionary space (8KB for user-defined words)
+dictionary_space: times 8192 db 0
 
 ; Definition source storage (for SAVE/LOAD persistence)
 def_src_buffer: times 4096 db 0     ; Stores source text of definitions
