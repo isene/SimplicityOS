@@ -2198,7 +2198,7 @@ lookup_word:
 
 .try_free:
     cmp rcx, 4
-    jne .try_screen_get
+    jne .try_cursor
     cmp byte [rdi], 'f'
     jne .try_see
     cmp byte [rdi+1], 'r'
@@ -2206,8 +2206,28 @@ lookup_word:
     cmp byte [rdi+2], 'e'
     jne .try_see
     cmp byte [rdi+3], 'e'
-    jne .try_screen_get
+    jne .try_cursor
     mov rax, word_free
+    jmp .done
+
+.try_cursor:
+    ; cursor-hide (11) or cursor-show (11)
+    cmp rcx, 11
+    jne .try_screen_get
+    cmp byte [rdi], 'c'
+    jne .try_screen_get
+    cmp byte [rdi+6], '-'
+    jne .try_screen_get
+    cmp byte [rdi+7], 'h'
+    je .is_cursor_hide
+    cmp byte [rdi+7], 's'
+    je .is_cursor_show
+    jmp .try_screen_get
+.is_cursor_hide:
+    mov rax, word_cursor_hide
+    jmp .done
+.is_cursor_show:
+    mov rax, word_cursor_show
     jmp .done
 
 .try_screen_get:
@@ -4566,6 +4586,30 @@ word_screen_char:
 .sc_empty:
     mov r15, data_stack
     xor r14, r14
+    ret
+
+word_cursor_hide:
+    ; CURSOR-HIDE - Disable VGA text cursor ( -- )
+    push rdx
+    mov al, 0x0A
+    mov dx, 0x3D4
+    out dx, al
+    mov al, 0x20            ; Bit 5 set = cursor disabled
+    mov dx, 0x3D5
+    out dx, al
+    pop rdx
+    ret
+
+word_cursor_show:
+    ; CURSOR-SHOW - Enable VGA text cursor ( -- )
+    push rdx
+    mov al, 0x0A
+    mov dx, 0x3D4
+    out dx, al
+    mov al, 13              ; Start scanline 13, cursor enabled
+    mov dx, 0x3D5
+    out dx, al
+    pop rdx
     ret
 
 word_screen_clear:
