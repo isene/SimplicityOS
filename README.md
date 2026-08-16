@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.18-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.10.0-brightgreen.svg)](CHANGELOG.md)
 
 **Bare-metal x86_64 operating system built on pure RPN principles.**
 
@@ -171,17 +171,15 @@ ok
 
 ```forth
 > xrpn          ( interactive calculator: type FOCAL directly )
-x: 0.0000
-5
-x: 5.0000
-3
-x: 3.0000
-sqrt
-x: 1.7321
-q
+```
 
+A fixed dashboard shows Alpha, LASTX and the T/Z/Y/X stack in color.
+Type `5`, `3`, `sqrt`, `sto 01`, `sf 05`, `x<y?` and so on; `end`
+returns to the OS. The words also work outside the calculator:
+
+```forth
 > xrpn-init
-> 10.0 xn fact
+> 10.0 xn hpfact prx
 3628800.0000
 ```
 
@@ -238,9 +236,9 @@ User Words (Apps)           <- Applications, user definitions
 ```
 
 **Memory Model:**
-- Heap starts at 2MB, grows upward
+- Dictionary at 2MB, heap above it growing up, demand-paged to 64MB
 - Stack uses R14 (TOS) + R15 (stack pointer)
-- Dictionary uses linked list
+- Apps load from a RAM disk filled at boot
 
 **Type System:**
 | Type | Value | Description |
@@ -255,7 +253,7 @@ User Words (Apps)           <- Applications, user definitions
 
 ```
 /boot      - Bootloader (512 bytes) and stage2
-/kernel    - x86_64 assembly kernel (~56KB)
+/kernel    - x86_64 assembly kernel (~61KB)
 /apps      - Applications in RPN (editor, games)
 /tools     - Build utilities
 /docs      - Technical documentation
