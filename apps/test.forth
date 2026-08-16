@@ -78,3 +78,6 @@
 "cfnest" [ 0 {cf} ! 3 begin dup 0 > while dup {cf} @ + {cf} ! 1 - repeat drop {cf} @ ] define
 "cfif" [ dup 0 > if dup 10 > if drop 99 then then ] define
 "cfbad" [ then ] define
+"at1" [ 68 {k} ! left? ] define
+"at2" [ 67 {k} ! right? ] define
+"at3" [ 0 {bf} ! 65 {k} ! fire? ] define

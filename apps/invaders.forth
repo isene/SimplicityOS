@@ -26,7 +26,10 @@
 "erase-ship" [ 32 0 {px} @ 1 - 23 screen-char 32 0 {px} @ 23 screen-char 32 0 {px} @ 1 + 23 screen-char ] define
 "draw-boom" [ 42 14 {px} @ 1 - 23 screen-char 42 14 {px} @ 23 screen-char 42 14 {px} @ 1 + 23 screen-char ] define
 
-"show-hud" [ 0 0 screen-set "Score " . {score} @ . "  Lives " . {lives} @ . "  Level " . {level} @ . ] define
+( Lives shown as ship icons top right )
+"life-icon" [ {s} ! {s} @ {lives} @ < if 94 15 else 32 0 then {s} @ 2 * 70 + 0 screen-char ] define
+"show-lives" [ 0 life-icon 1 life-icon 2 life-icon ] define
+"show-hud" [ 0 0 screen-set "Score " . {score} @ . "  Level " . {level} @ . show-lives ] define
 
 ( --- alien movement: state 0 = horizontal, 1 = descend --- )
 "speed-set" [
@@ -86,7 +89,7 @@
 
 "bullet-tick" [ {bf} @ 1 = if move-bullet then ] define
 
-( --- alien bomb: falls from below the grid, round-robin column --- )
+( --- alien bomb: alternates aimed-at-ship and round-robin --- )
 "next-bomber" [
   18 {j} !
   begin {j} @ 0 > while
@@ -96,8 +99,27 @@
   repeat
 ] define
 
+"aim-one" [
+  {j} @ ax {px} @ - absv {ad} !
+  {ad} @ {bd} @ < if {ad} @ {bd} ! {j} @ {vi} ! then
+] define
+
+"aim-bomber" [
+  99 {bd} !
+  0 {j} !
+  begin {j} @ 18 < while
+    {j} @ alive? if aim-one then
+    {j} @ 1 + {j} !
+  repeat
+] define
+
+"pick-bomber" [
+  {vn} @ 1 + {vn} !
+  {vn} @ 2 mod 0 = if aim-bomber else next-bomber then
+] define
+
 "erase-bomb" [ 32 0 {vx} @ {vy} @ screen-char ] define
-"do-bomb" [ next-bomber {vi} @ ax {vx} ! {gy} @ 6 + {vy} ! 1 {vf} ! 33 12 {vx} @ {vy} @ screen-char ] define
+"do-bomb" [ pick-bomber {vi} @ ax {vx} ! {gy} @ 6 + {vy} ! 1 {vf} ! 33 12 {vx} @ {vy} @ screen-char ] define
 
 "ship-hit" [
   {lives} @ 1 - {lives} !
@@ -113,7 +135,7 @@
 "move-bomb" [
   erase-bomb
   {vy} @ 1 + {vy} !
-  {vy} @ 23 > if 0 {vf} ! 8 {vd} ! draw-ship else 33 12 {vx} @ {vy} @ screen-char check-ship then
+  {vy} @ 23 > if 0 {vf} ! 5 {vd} ! draw-ship else 33 12 {vx} @ {vy} @ screen-char check-ship then
 ] define
 
 "maybe-bomb" [ {nalive} @ 0 > if do-bomb then ] define
@@ -139,9 +161,11 @@
 ] define
 
 ( --- input --- )
-"left?" [ {k} @ 104 = {k} @ key-left = or ] define
-"right?" [ {k} @ 108 = {k} @ key-right = or ] define
-"fire?" [ {k} @ 120 = {k} @ 32 = or {bf} @ 0 = and ] define
+( Arrows arrive two ways: scancode constants, or ANSI ESC [ D/C/A )
+( character sequences under QEMU's curses display )
+"left?" [ {k} @ 104 = {k} @ key-left = or {k} @ 68 = or ] define
+"right?" [ {k} @ 108 = {k} @ key-right = or {k} @ 67 = or ] define
+"fire?" [ {k} @ 120 = {k} @ 32 = or {k} @ 65 = or {k} @ key-up = or {bf} @ 0 = and ] define
 
 "do-tick" [
   {ms} @ 0 = if move-horiz then
@@ -155,7 +179,7 @@
   40 {px} ! 6 {gx} ! 2 {gy} ! 1 {dir} ! 0 {ms} !
   262143 {alive} ! 18 {nalive} !
   0 {score} ! 3 {lives} ! 1 {level} !
-  0 {bf} ! 0 {vf} ! 8 {vd} ! 0 {vi} !
+  0 {bf} ! 0 {vf} ! 8 {vd} ! 0 {vi} ! 0 {vn} !
   0 {t} ! 0 {bt} ! 0 {vt} ! 1 {run} !
   speed-set
   show-hud draw-ship draw-aliens
