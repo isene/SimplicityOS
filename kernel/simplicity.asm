@@ -16,12 +16,15 @@
 ;   0x100000 - 0x160000  App load buffer
 ;   0x200000 - 0x240000  Dictionary (user definitions)
 ;   0x240000 - 0x248000  Compile buffer
-;   0x260000 - 0x400000  Heap (bump allocator, capped)
+;   0x260000 - 0x4000000 Heap (grows on demand via #PF, 64MB cap)
+;   0x074000 - 0x075000  IDT
 ; ============================================================
 DICT_SPACE      equ 0x200000
 DICT_END        equ 0x240000
 HEAP_START      equ 0x260000
-HEAP_END        equ 0x400000
+HEAP_END        equ 0x400000    ; initially mapped boundary
+HEAP_MAX        equ 0x4000000   ; heap ceiling (64MB, mapped on demand)
+IDT_ADDR        equ 0x74000     ; 4KB IDT after the page tables
 RAMDISK_ADDR    equ 0x28000
 RAMDISK_FIRST   equ 200         ; First sector held in the RAM disk
 RAMDISK_COUNT   equ 248         ; Sectors 200-447
@@ -35,6 +38,9 @@ long_mode_64:
 
     ; Initialize x87 FPU (float words use it; exceptions masked)
     fninit
+
+    ; Interrupts: IDT with exception recovery, PIC remap, keyboard IRQ
+    call init_interrupts
 
     ; Clear screen in 64-bit mode (2000 cells = 500 qwords)
     mov rdi, 0xB8000
@@ -361,13 +367,223 @@ update_hw_cursor:
 
 ; Wait for keypress and return key code in RAX
 ; Returns: ASCII for normal keys, or special codes (KEY_UP, KEY_DOWN, etc.)
+; ============================================================
+; Interrupts: IDT, exception recovery, PIC, keyboard IRQ
+; Exceptions print a report and drop back to the REPL instead of
+; triple-faulting. Page faults in the heap window map fresh 2MB
+; pages so the heap grows on demand up to HEAP_MAX.
+; ============================================================
+
+%macro EXC_NOERR 1
+exc_stub_%1:
+    push qword 0
+    push qword %1
+    jmp exc_common
+%endmacro
+%macro EXC_ERR 1
+exc_stub_%1:
+    push qword %1
+    jmp exc_common
+%endmacro
+
+EXC_NOERR 0
+EXC_NOERR 1
+EXC_NOERR 2
+EXC_NOERR 3
+EXC_NOERR 4
+EXC_NOERR 5
+EXC_NOERR 6
+EXC_NOERR 7
+EXC_ERR 8
+EXC_NOERR 9
+EXC_ERR 10
+EXC_ERR 11
+EXC_ERR 12
+EXC_ERR 13
+EXC_ERR 14
+EXC_NOERR 15
+EXC_NOERR 16
+EXC_ERR 17
+EXC_NOERR 18
+EXC_NOERR 19
+EXC_NOERR 20
+EXC_NOERR 21
+EXC_NOERR 22
+EXC_NOERR 23
+EXC_NOERR 24
+EXC_NOERR 25
+EXC_NOERR 26
+EXC_NOERR 27
+EXC_NOERR 28
+EXC_NOERR 29
+EXC_NOERR 30
+EXC_NOERR 31
+
+exc_stub_table:
+    dq exc_stub_0, exc_stub_1, exc_stub_2, exc_stub_3
+    dq exc_stub_4, exc_stub_5, exc_stub_6, exc_stub_7
+    dq exc_stub_8, exc_stub_9, exc_stub_10, exc_stub_11
+    dq exc_stub_12, exc_stub_13, exc_stub_14, exc_stub_15
+    dq exc_stub_16, exc_stub_17, exc_stub_18, exc_stub_19
+    dq exc_stub_20, exc_stub_21, exc_stub_22, exc_stub_23
+    dq exc_stub_24, exc_stub_25, exc_stub_26, exc_stub_27
+    dq exc_stub_28, exc_stub_29, exc_stub_30, exc_stub_31
+
+exc_common:
+    ; Stack: vector, error code, RIP, CS, RFLAGS, RSP, SS
+    push rax
+    push rbx
+
+    mov rax, [rsp+16]           ; vector
+    cmp rax, 14
+    jne .exc_fatal
+
+    ; Page fault: demand-map the heap window
+    mov rax, cr2
+    cmp rax, HEAP_END
+    jb .exc_fatal               ; below the boot-mapped area: real bug
+    cmp rax, HEAP_MAX
+    jae .exc_fatal
+    mov rbx, rax
+    shr rbx, 21                 ; PD index
+    shl rbx, 3
+    add rbx, 0x72000            ; PD base (both boot paths)
+    shr rax, 21
+    shl rax, 21                 ; 2MB-align the fault address
+    or rax, 0x83                ; present | writable | 2MB
+    mov [rbx], rax
+    mov rax, cr2
+    invlpg [rax]
+    pop rbx
+    pop rax
+    add rsp, 16                 ; drop vector + error code
+    iretq
+
+.exc_fatal:
+    ; Report and recover to the REPL
+    push rsi
+    mov rax, str_exc
+    call print_string
+    mov rax, [rsp+24]           ; vector (3 pushes deep now)
+    call print_number
+    mov rax, str_exc_at
+    call print_string
+    mov rax, [rsp+40]           ; RIP
+    call print_number
+    call newline
+    jmp repl_recover
+
+str_exc: db 13, 10, '(exception ', 0
+str_exc_at: db ' at ', 0
+
+; Shared IRQ stub: acknowledge and resume (keyboard bytes are read
+; by the polling code; the interrupt only wakes HLT)
+irq_stub:
+    push rax
+    mov al, 0x20
+    out 0xA0, al
+    out 0x20, al
+    pop rax
+    iretq
+
+; idt_set_gate: RCX = vector, RAX = handler
+idt_set_gate:
+    push rbx
+    push rdx
+    mov rbx, rcx
+    shl rbx, 4
+    add rbx, IDT_ADDR
+    mov rdx, rax
+    mov [rbx], dx               ; offset 0-15
+    mov word [rbx+2], 0x08      ; code selector
+    mov word [rbx+4], 0x8E00    ; present, interrupt gate, IST 0
+    shr rdx, 16
+    mov [rbx+6], dx             ; offset 16-31
+    shr rdx, 16
+    mov [rbx+8], edx            ; offset 32-63
+    mov dword [rbx+12], 0
+    pop rdx
+    pop rbx
+    ret
+
+init_interrupts:
+    push rax
+    push rcx
+    push rsi
+    push rdi
+
+    ; Clear IDT
+    mov rdi, IDT_ADDR
+    xor eax, eax
+    mov rcx, 512
+    rep stosq
+
+    ; Exception gates 0-31
+    xor rcx, rcx
+    mov rsi, exc_stub_table
+.ii_exc:
+    mov rax, [rsi + rcx*8]
+    call idt_set_gate
+    inc rcx
+    cmp rcx, 32
+    jb .ii_exc
+
+    ; IRQ gates 0x20-0x2F all share the acknowledge stub
+    mov rcx, 0x20
+.ii_irq:
+    mov rax, irq_stub
+    call idt_set_gate
+    inc rcx
+    cmp rcx, 0x30
+    jb .ii_irq
+
+    lidt [idtr]
+
+    ; Remap PIC: IRQs to vectors 0x20-0x2F
+    mov al, 0x11
+    out 0x20, al
+    out 0xA0, al
+    mov al, 0x20
+    out 0x21, al
+    mov al, 0x28
+    out 0xA1, al
+    mov al, 4
+    out 0x21, al
+    mov al, 2
+    out 0xA1, al
+    mov al, 1
+    out 0x21, al
+    out 0xA1, al
+    ; Mask everything except the keyboard (IRQ1)
+    mov al, 0xFD
+    out 0x21, al
+    mov al, 0xFF
+    out 0xA1, al
+
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rax
+    ret
+
+align 8
+idtr:
+    dw 4095
+    dq IDT_ADDR
+
 wait_key:
     push rbx
 .wait:
     ; Check if key available (port 0x64, bit 0)
     in al, 0x64
     test al, 1
-    jz .wait
+    jnz .have_byte
+    ; Idle until the keyboard interrupt wakes us (sti;hlt is atomic)
+    sti
+    hlt
+    cli
+    jmp .wait
+.have_byte:
 
     ; Read scancode from port 0x60
     in al, 0x60
@@ -754,7 +970,21 @@ REPL:
     call load_apps
     mov qword [app_loading], 0  ; Done loading, enable def source saving
     call word_clstk             ; Clear stack after loading apps
+    jmp repl_main
 
+; Recovery entry: exceptions reset all interpreter state and land here
+repl_recover:
+    mov rsp, 0x80000
+    mov r15, data_stack
+    xor r14, r14
+    mov rbp, 0x90000
+    mov byte [compile_mode], 0
+    mov byte [array_mode], 0
+    mov byte [ctl_items], 0
+    mov qword [app_active], 0
+    fninit
+
+repl_main:
 .main_loop:
     ; Print prompt
     mov rax, str_prompt
@@ -1454,8 +1684,9 @@ allocate_object:
     and rax, ~15
 
     ; Cap: heap exhausted returns the shared OOM string object
+    ; (pages beyond HEAP_END are mapped on demand by the #PF handler)
     lea rbx, [rax + rcx]
-    cmp rbx, HEAP_END
+    cmp rbx, HEAP_MAX
     jae .alloc_oom
 
     ; Update heap pointer
@@ -4743,7 +4974,7 @@ word_fetch:
     ; Validate address: below 1000 or beyond mapped 4MB is invalid
     cmp r14, 1000
     jl .fetch_invalid       ; Very small values likely wrong
-    cmp r14, 0x400000
+    cmp r14, HEAP_MAX
     jae .fetch_invalid      ; Beyond mapped memory: would triple fault
 
     mov rax, [r14]
@@ -4764,7 +4995,7 @@ word_store:
     ; Validate address (below 1000 or beyond mapped 4MB is invalid)
     cmp r14, 1000
     jl .store_invalid
-    cmp r14, 0x400000
+    cmp r14, HEAP_MAX
     jae .store_invalid
 
     mov rax, r14            ; Address
@@ -4802,7 +5033,7 @@ word_c_fetch:
     ; c@ ( addr -- byte ) - Fetch byte from address
     cmp r14, 1000
     jl .c_fetch_invalid
-    cmp r14, 0x400000
+    cmp r14, HEAP_MAX
     jae .c_fetch_invalid
     movzx rax, byte [r14]   ; Read byte, zero-extend to 64-bit
     mov r14, rax
@@ -4819,7 +5050,7 @@ word_c_store:
     ; c! ( byte addr -- ) - Store byte at address
     cmp r14, 1000
     jl .c_store_invalid
-    cmp r14, 0x400000
+    cmp r14, HEAP_MAX
     jae .c_store_invalid
     mov rax, r14            ; Address
     sub r15, 8
@@ -4919,7 +5150,7 @@ word_eval:
     ; Address sanity
     cmp rax, 1000
     jl .ev_bad
-    cmp rax, 0x400000
+    cmp rax, HEAP_MAX
     jae .ev_bad
 
     ; STRING object: text at +16. Anything else (allot'ed buffers

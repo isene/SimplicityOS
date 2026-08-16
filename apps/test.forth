@@ -90,3 +90,4 @@
 "ft7" [ 7 s>f 2.0 f/ ] define
 "ft8" [ 3.75 f>s ] define
 "evtest" [ "3 4 + ." eval ] define
+"pftest" [ 20000000 allot 19000000 + dup 12345 swap ! @ ] define
