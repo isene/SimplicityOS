@@ -17,3 +17,6 @@
 
 # Claude Code session cache
 .claude/tsc-cache/
+
+# Build directory
+build/
