@@ -517,6 +517,17 @@ irq_stub:
     pop rax
     iretq
 
+; Timer stub: count ticks (PIT default ~18.2 Hz), acknowledge
+tick_stub:
+    push rax
+    inc qword [tick_count]
+    mov al, 0x20
+    out 0x20, al
+    pop rax
+    iretq
+
+tick_count: dq 0
+
 ; idt_set_gate: RCX = vector, RAX = handler
 idt_set_gate:
     push rbx
@@ -567,6 +578,10 @@ init_interrupts:
     inc rcx
     cmp rcx, 0x30
     jb .ii_irq
+    ; Timer gets its counting stub
+    mov rcx, 0x20
+    mov rax, tick_stub
+    call idt_set_gate
 
     lidt [idtr]
 
@@ -585,8 +600,8 @@ init_interrupts:
     mov al, 1
     out 0x21, al
     out 0xA1, al
-    ; Mask everything except the keyboard (IRQ1)
-    mov al, 0xFD
+    ; Mask everything except timer (IRQ0) and keyboard (IRQ1)
+    mov al, 0xFC
     out 0x21, al
     mov al, 0xFF
     out 0xA1, al
@@ -4239,6 +4254,77 @@ match_float_word:
     mov rax, word_color
     ret
 .mf_not_col:
+    ; ticks (5) waittick (8) beep (4) rtc (3) rtcd (4) fatan2 (6)
+    cmp rcx, 5
+    jne .mf_not_ticks
+    cmp byte [rdi], 't'
+    jne .mf_not_ticks
+    cmp byte [rdi+1], 'i'
+    jne .mf_not_ticks
+    cmp byte [rdi+4], 's'
+    jne .mf_not_ticks
+    mov rax, word_ticks
+    ret
+.mf_not_ticks:
+    cmp rcx, 8
+    jne .mf_not_wt
+    cmp byte [rdi], 'w'
+    jne .mf_not_wt
+    cmp byte [rdi+4], 't'
+    jne .mf_not_wt
+    cmp byte [rdi+7], 'k'
+    jne .mf_not_wt
+    mov rax, word_waittick
+    ret
+.mf_not_wt:
+    cmp rcx, 4
+    jne .mf_not_beep
+    cmp byte [rdi], 'b'
+    jne .mf_not_beep
+    cmp byte [rdi+1], 'e'
+    jne .mf_not_beep
+    cmp byte [rdi+2], 'e'
+    jne .mf_not_beep
+    cmp byte [rdi+3], 'p'
+    jne .mf_not_beep
+    mov rax, word_beep
+    ret
+.mf_not_beep:
+    cmp rcx, 3
+    jne .mf_not_rtc
+    cmp byte [rdi], 'r'
+    jne .mf_not_rtc
+    cmp byte [rdi+1], 't'
+    jne .mf_not_rtc
+    cmp byte [rdi+2], 'c'
+    jne .mf_not_rtc
+    mov rax, word_rtc
+    ret
+.mf_not_rtc:
+    cmp rcx, 4
+    jne .mf_not_rtcd
+    cmp byte [rdi], 'r'
+    jne .mf_not_rtcd
+    cmp byte [rdi+1], 't'
+    jne .mf_not_rtcd
+    cmp byte [rdi+2], 'c'
+    jne .mf_not_rtcd
+    cmp byte [rdi+3], 'd'
+    jne .mf_not_rtcd
+    mov rax, word_rtcd
+    ret
+.mf_not_rtcd:
+    cmp rcx, 6
+    jne .mf_not_fat2
+    cmp byte [rdi], 'f'
+    jne .mf_not_fat2
+    cmp byte [rdi+1], 'a'
+    jne .mf_not_fat2
+    cmp byte [rdi+5], '2'
+    jne .mf_not_fat2
+    mov rax, word_fatan2
+    ret
+.mf_not_fat2:
     cmp byte [rdi], 'f'
     jne .mf_no
     cmp rcx, 2
@@ -5253,6 +5339,182 @@ word_color:
 .col_empty:
     mov r15, [stack_floor]
     xor r14, r14
+    ret
+
+word_fatan2:
+    ; fatan2 ( y x -- angle ) full-quadrant arctangent, radians
+    BINOP_POP
+    mov [fp_tmp2], r14          ; x
+    mov rax, [r15]
+    mov [fp_tmp1], rax          ; y
+    fld qword [fp_tmp1]         ; y
+    fld qword [fp_tmp2]         ; x (ST0), y (ST1)
+    fpatan
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_ticks:
+    ; ticks ( -- n ) timer ticks since boot (~18.2 per second)
+    mov [r15], r14
+    add r15, 8
+    mov r14, [tick_count]
+    ret
+
+word_waittick:
+    ; waittick ( -- ) sleep in HLT until the next timer tick
+    push rax
+    mov rax, [tick_count]
+.wt_loop:
+    sti
+    hlt
+    cli
+    cmp rax, [tick_count]
+    je .wt_loop
+    pop rax
+    ret
+
+word_beep:
+    ; beep ( hz ticks -- ) PC speaker tone lasting n timer ticks
+    push rbx
+    push rcx
+    push rdx
+    mov rcx, r14                ; ticks
+    sub r15, 8
+    mov rbx, [r15]              ; hz
+    sub r15, 8
+    cmp r15, [stack_floor]
+    jl .bp_uflow
+    mov r14, [r15]
+    jmp .bp_go
+.bp_uflow:
+    mov r15, [stack_floor]
+    xor r14, r14
+.bp_go:
+    cmp rbx, 20
+    jl .bp_done
+    cmp rbx, 20000
+    jg .bp_done
+    mov rax, 1193182
+    xor rdx, rdx
+    div rbx
+    mov rbx, rax
+    mov al, 0xB6                ; PIT channel 2, square wave
+    out 0x43, al
+    mov al, bl
+    out 0x42, al
+    mov al, bh
+    out 0x42, al
+    in al, 0x61                 ; speaker gate on
+    or al, 3
+    out 0x61, al
+.bp_wait:
+    test rcx, rcx
+    jz .bp_off
+    mov rax, [tick_count]
+.bp_tick:
+    sti
+    hlt
+    cli
+    cmp rax, [tick_count]
+    je .bp_tick
+    dec rcx
+    jmp .bp_wait
+.bp_off:
+    in al, 0x61                 ; speaker off
+    and al, 0xFC
+    out 0x61, al
+.bp_done:
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; Read one CMOS register (AL=index) to binary in RAX
+cmos_read:
+    push rbx
+    out 0x70, al
+    in al, 0x71
+    movzx rax, al
+    cmp byte [rtc_binary], 0
+    jne .cr_done
+    mov rbx, rax                ; BCD to binary
+    shr rbx, 4
+    imul rbx, 10
+    and rax, 0x0F
+    add rax, rbx
+.cr_done:
+    pop rbx
+    ret
+
+rtc_binary: db 0
+
+; Wait until the RTC is not mid-update, cache the data format
+rtc_sync:
+.rs_wait:
+    mov al, 0x0A
+    out 0x70, al
+    in al, 0x71
+    test al, 0x80
+    jnz .rs_wait
+    mov al, 0x0B
+    out 0x70, al
+    in al, 0x71
+    and al, 4                   ; DM bit: 1 = binary
+    mov [rtc_binary], al
+    ret
+
+word_rtc:
+    ; rtc ( -- s m h ) CMOS clock, 24-hour
+    push rbx
+    push rcx
+    call rtc_sync
+    mov al, 0
+    call cmos_read
+    mov rbx, rax                ; seconds
+    mov al, 2
+    call cmos_read
+    mov rcx, rax                ; minutes
+    mov al, 4
+    call cmos_read              ; hours in RAX
+    mov [r15], r14
+    add r15, 8
+    mov r14, rbx
+    mov [r15], r14
+    add r15, 8
+    mov r14, rcx
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    pop rcx
+    pop rbx
+    ret
+
+word_rtcd:
+    ; rtcd ( -- d mo y ) CMOS date, year as 20xx
+    push rbx
+    push rcx
+    call rtc_sync
+    mov al, 7
+    call cmos_read
+    mov rbx, rax                ; day
+    mov al, 8
+    call cmos_read
+    mov rcx, rax                ; month
+    mov al, 9
+    call cmos_read              ; year 00-99
+    add rax, 2000
+    mov [r15], r14
+    add r15, 8
+    mov r14, rbx
+    mov [r15], r14
+    add r15, 8
+    mov r14, rcx
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    pop rcx
+    pop rbx
     ret
 
 word_eval:
@@ -9030,6 +9292,8 @@ load_apps:
     call load_app_by_cstring
     mov rsi, app_name_hp41
     call load_app_by_cstring
+    mov rsi, app_name_uac
+    call load_app_by_cstring
 
     ; Done
     mov rsi, serial_apps_done
@@ -9049,6 +9313,7 @@ app_name_test: db 'test', 0
 app_name_xrpn: db 'xrpn', 0
 app_name_demo: db 'demo', 0
 app_name_hp41: db 'hp41', 0
+app_name_uac: db 'uac', 0
 
 ; load_app_by_cstring - Load app by C string name (for boot time)
 ; Input: RSI = pointer to null-terminated app name

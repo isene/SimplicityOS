@@ -1,5 +1,37 @@
 # Simplicity OS - Changelog
 
+## [0.10.0] - 2026-08-17 - Full XRPN Coverage and the Ultimate Alarm Clock
+
+All 274 XRPN commands traversed: 154 implemented, the rest skipped
+for a named reason. See docs/XRPN-COVERAGE.md.
+
+### Kernel
+- Timer interrupt: IRQ0 counts ticks; `ticks` reads the count,
+  `waittick` halts the CPU until the next tick (idle loops now
+  sleep instead of spin)
+- `beep` ( hz ticks -- ) plays the PC speaker via PIT channel 2
+- `rtc` ( -- s m h ) and `rtcd` ( -- d mo y ) read the CMOS clock,
+  BCD and binary modes
+- `fatan2` ( y x -- angle ) full-quadrant arctangent
+
+### XRPN
+- New: pi, rand, sign, tenx, expx1, ln1x, root, %ch, d-r, r-d,
+  p-r, r-p, grad, x<> for y/z/t/l/NN, flag ops (sf, cf, fs?, fc?,
+  fs?c, fc?c, invf, x<>f, stoflag, rclflag), all 18 conditionals,
+  st+ st- st* st/, sreg, correct, ashf, posa, anum, arcli, hr,
+  hms, hms+, hms-, time, date, dow, tone, tonexy, beep, aviewc,
+  pse, getkey, getkeyx, view, cld, adv, pra, prregs, prflags
+- Interactive conditionals answer YES or NO
+- Statistics registers relocatable with sreg
+- Verified with three real HP-41 programs: Lambert W, Luhn
+  checksum, color luminosity
+
+### Apps
+- `uac`: native port of the Ultimate Alarm Clock. Live clock,
+  set alarm at HH.MM, alarm in 8h or 30m, snooze, audible time
+  beeps, rings until answered. Idles on waittick at ~18 wakeups
+  per second, CPU halted between ticks
+
 ## [0.9.1] - 2026-08-16 - Screen Scrolling and the XRPN Dashboard
 
 - The screen scrolls: output past the last line shifts everything

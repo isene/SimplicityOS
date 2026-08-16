@@ -251,6 +251,15 @@ index or non-array pushes "(bad array index)".
 > "count" [ 5 begin dup . 1 - dup 0 = until drop ] define
 ```
 
+### beep
+**Category:** Kernel
+**Stack:** `( hz ticks -- )`
+**Description:** Sound the PC speaker at hz for ticks timer ticks
+(18.2 per second). Blocks while playing.
+```forth
+> 440 9 beep    ( A for half a second )
+```
+
 ### c!
 **Category:** Kernel
 **Stack:** `( byte addr -- )`
@@ -559,6 +568,22 @@ like the xrpn calculator REPL.
 <3> 2 3 1 ok
 ```
 
+### rtc
+**Category:** Kernel
+**Stack:** `( -- s m h )`
+**Description:** Read the CMOS real-time clock. Handles BCD and
+binary modes.
+```forth
+> rtc . . .
+22 14 34 ok
+```
+
+### rtcd
+**Category:** Kernel
+**Stack:** `( -- d mo y )`
+**Description:** Read the date from the CMOS clock. Year is full
+(2000 + yy).
+
 ### save
 **Category:** Kernel
 **Stack:** `( -- )`
@@ -616,6 +641,11 @@ like the xrpn calculator REPL.
 > 5 0 > if "positive" . then
 positive ok
 ```
+
+### ticks
+**Category:** Kernel
+**Stack:** `( -- n )`
+**Description:** Timer ticks since boot, 18.2 per second.
 
 ### type
 **Category:** Kernel
@@ -684,6 +714,15 @@ ok
 **Stack:** `( -- n )`
 **Description:** Get count of named variables.
 
+### waittick
+**Category:** Kernel
+**Stack:** `( -- )`
+**Description:** Halt the CPU until the next timer tick (up to
+55 ms). The idle-friendly way to pace a loop.
+```forth
+> begin waittick key? dup 0 = while drop repeat
+```
+
 ### while
 **Category:** Kernel
 **Stack:** `( flag -- )`
@@ -747,7 +786,10 @@ square cube ... ok
 `if` `then` `else` `begin` `until` `while` `repeat` `again`
 
 ### I/O
-`emit` `cr` `key` `key?`
+`emit` `cr` `key` `key?` `beep`
+
+### Time
+`ticks` `waittick` `rtc` `rtcd`
 
 ### Float
 Doubles live as raw IEEE-754 bits in ordinary stack cells; only
@@ -761,6 +803,7 @@ f-words interpret them. Literals: `3.14`, `-0.5` (no exponent form).
 | `f< f> f=` | ( a b -- flag ) | comparison |
 | `fneg fabs fsqrt` | ( f -- r ) | |
 | `fsin fcos ftan fatan` | ( f -- r ) | radians |
+| `fatan2` | ( y x -- angle ) | full quadrant, radians |
 | `fln flog fexp` | ( f -- r ) | |
 | `fpow` | ( a b -- a^b ) | a positive |
 | `fpi` | ( -- pi ) | |
@@ -808,4 +851,18 @@ increasing speed. Controls: h/l or arrows move, x or space fires, q quits.
 Loaded at boot; start with:
 ```forth
 > invaders
+```
+
+### xrpn
+HP-41 calculator with a fixed stack dashboard. Type FOCAL commands;
+see [XRPN-COVERAGE.md](XRPN-COVERAGE.md) for the command set.
+```forth
+> xrpn
+```
+
+### uac
+The Ultimate Alarm Clock: live clock, alarms, snooze, audible time.
+Keys: a set, 8 in 8h, p in 30m, c clear, h hear time, s snooze, q quit.
+```forth
+> uac
 ```

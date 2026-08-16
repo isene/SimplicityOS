@@ -191,8 +191,19 @@ FOCAL-style programs. Write programs as `.xrpn` files in `apps/`;
 
 Programs can also be written on the OS itself: create a file in the
 editor using hp-words, save with `:w name`, run with `"name" runfile`.
-The kernel word `eval` interprets any string as source. See
-`apps/demo.xrpn` and docs/ROADMAP.md for what is covered.
+The kernel word `eval` interprets any string as source. All 274 XRPN
+commands are traversed in [docs/XRPN-COVERAGE.md](docs/XRPN-COVERAGE.md):
+154 implemented, the rest skipped for a named reason.
+
+### UAC (Ultimate Alarm Clock)
+
+```forth
+> uac
+```
+
+Live clock, alarms (set at HH.MM, in 8h, in 30m), snooze, audible
+time and a ring that will not stop until answered. The clock idles
+with the CPU halted between timer ticks.
 
 ### Space Invaders
 
@@ -214,7 +225,7 @@ Core primitives: `+ - * / mod dup drop swap . .s @ ! if then else begin while re
 Extended operations loaded at boot time.
 
 ### User Words (Apps)
-Applications like `editor`, `hello`, `invaders`.
+Applications like `editor`, `invaders`, `xrpn`, `uac`.
 
 ## Architecture
 

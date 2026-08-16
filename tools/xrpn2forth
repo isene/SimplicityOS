@@ -39,11 +39,40 @@ SIMPLE = {
     'decoct': 'decoct', 'octdec': 'octdec',
     'int': 'hpint', 'frc': 'hpfrc', 'rnd': 'hprnd',
     'r^': 'rup', 'prompt': 'aview', 'arcl x': 'arclx',
+    'sign': 'hpsign', 'tenx': 'hptenx', '10^x': 'hptenx',
+    'expx1': 'hpexpx1', 'e^x-1': 'hpexpx1',
+    'ln1x': 'hpln1x', 'ln1+x': 'hpln1x',
+    'root': 'hproot', 'recip': 'hpinv',
+    'percentch': 'hppercch', '%ch': 'hppercch',
+    'rand': 'rand', 'lift': 'enter', 'grad': 'grad',
+    'd_r': 'd_r', 'd-r': 'd_r', 'r_d': 'r_d', 'r-d': 'r_d',
+    'p_r': 'p_r', 'p-r': 'p_r', 'r_p': 'r_p', 'r-p': 'r_p',
+    'invf': 'invf', 'x<>f': 'x<>f',
+    'stoflag': 'stoflag', 'rclflag': 'rclflag',
+    'ashf': 'ashf', 'anum': 'anum', 'posa': 'posa',
+    'correct': 'correct',
+    'hr': 'hr', 'hms': 'hms', 'hms+': 'hms+', 'hms-': 'hms-',
+    'time': 'time', 'date': 'date', 'dow': 'dow',
+    'pse': 'pse', 'cld': 'cld', 'adv': 'adv', 'pra': 'pra',
+    'prregs': 'prregs', 'prflags': 'prflags',
+    'geir': 'geir', 'version': 'xversion', 'sizeq': 'sizeq',
+    'add': 'hp+', 'subtract': 'hp-',
+    'multiply': 'hp*', 'divide': 'hp/',
+    'beep': '7 tone',
+    'getkey': 'getkey', 'getkeyx': 'getkeyx',
+    'pi': '3.141592653589793 xn',
+    'arcli': 'arcli', 'tonexy': 'tonexy', 'aviewc': 'aviewc',
 }
 REG_OPS = {'sto': 'hpsto', 'rcl': 'hprcl', 'st+': 'hpst+',
            'st-': 'hpst-', 'st*': 'hpst*', 'st/': 'hpst/',
            'sf': 'hpsf', 'cf': 'hpcf',
-           'asto': 'asto', 'arcl': 'arcl'}
+           'asto': 'asto', 'arcl': 'arcl',
+           'tone': 'tone', 'view': 'view',
+           'sreg': 'sreg', 'size': 'hpsize'}
+COND_NN = {'x=nn?': 'hpx=nn?', 'x!=nn?': 'hpx!=nn?', 'x#nn?': 'hpx!=nn?',
+           'x<nn?': 'hpx<nn?', 'x<=nn?': 'hpx<=nn?',
+           'x>nn?': 'hpx>nn?', 'x>=nn?': 'hpx>=nn?'}
+XCHG_LETTERS = {'y': 'xy', 'z': 'xchgz', 't': 'xchgt', 'l': 'xchgl'}
 PREDICATES = {'x=0?', 'x!=0?', 'x<0?', 'x>0?', 'x<=0?', 'x>=0?',
               'x=y?', 'x!=y?', 'x<y?', 'x>y?', 'x<=y?', 'x>=y?'}
 PRED_ALIAS = {'x#0?': 'x!=0?', 'x#y?': 'x!=y?'}
@@ -92,6 +121,24 @@ def xlate(line, in_loop_pred=False):
         die("unsupported indirect form", line)
     if len(parts) == 2:
         op, arg = parts
+        if op in COND_NN:
+            if not arg.isdigit():
+                die("non-numeric register", line)
+            return f"{int(arg)} {COND_NN[op]}", True
+        if op == 'x<>':
+            if arg in XCHG_LETTERS:
+                return XCHG_LETTERS[arg], False
+            if arg.isdigit():
+                return f"{int(arg)} hpxchg", False
+            die("bad x<> target", line)
+        if op == 'fc?':
+            if not arg.isdigit():
+                die("non-numeric flag", line)
+            return f"{int(arg)} hpfc?", True
+        if op == 'fc?c':
+            if not arg.isdigit():
+                die("non-numeric flag", line)
+            return f"{int(arg)} hpfc?c", True
         if op in REG_OPS:
             if not arg.isdigit():
                 die("indirect or non-numeric register unsupported", line)

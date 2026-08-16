@@ -5,6 +5,8 @@
 ( --- state --- )
 800 allot {hpreg} !
 0 {hpflg} !
+11 {sbase} !
+rtc + + 1 + {rs2} !
 
 "xf2" [ 1 swap begin dup 0 > while swap 2 * swap 1 - repeat drop ] define
 "regaddr" [ 8 * {hpreg} @ + ] define
@@ -30,8 +32,9 @@
 1 {degm} !
 "deg" [ 1 {degm} ! ] define
 "rad" [ 0 {degm} ! ] define
-"torad" [ {degm} @ 1 = if fpi f* 180.0 f/ then ] define
-"fromrad" [ {degm} @ 1 = if 180.0 f* fpi f/ then ] define
+"grad" [ 2 {degm} ! ] define
+"torad" [ {degm} @ 1 = if fpi f* 180.0 f/ then {degm} @ 2 = if fpi f* 200.0 f/ then ] define
+"fromrad" [ {degm} @ 1 = if 180.0 f* fpi f/ then {degm} @ 2 = if 200.0 f* fpi f/ then ] define
 
 ( --- unary on X, L = old X --- )
 "hpchs" [ {xr} @ fneg {xr} ! ] define
@@ -57,6 +60,19 @@
 "hpln" [ {xr} @ {lr} ! {xr} @ fln {xr} ! ] define
 "hplog" [ {xr} @ {lr} ! {xr} @ flog {xr} ! ] define
 "hpexp" [ {xr} @ {lr} ! {xr} @ fexp {xr} ! ] define
+
+( --- more math --- )
+"hpsign" [ {xr} @ {lr} ! 0.0 {s2} ! {xr} @ 0.0 f> if 1.0 {s2} ! then {xr} @ 0.0 f< if 1.0 fneg {s2} ! then {s2} @ {xr} ! ] define
+"hptenx" [ {xr} @ {lr} ! 10.0 {xr} @ fpow {xr} ! ] define
+"hpexpx1" [ {xr} @ {lr} ! {xr} @ fexp 1.0 f- {xr} ! ] define
+"hpln1x" [ {xr} @ {lr} ! {xr} @ 1.0 f+ fln {xr} ! ] define
+"hproot" [ {xr} @ {lr} ! {yr} @ 1.0 {xr} @ f/ fpow {zr} @ {yr} ! {tr} @ {zr} ! {xr} ! ] define
+"hppercch" [ {xr} @ {lr} ! {xr} @ {yr} @ f- {yr} @ f/ 100.0 f* {xr} ! ] define
+"rand" [ {rs2} @ 6364136223846793005 * 1442695040888963407 + dup {rs2} ! 4294967296 / dup 0 < if 0 swap - then 2147483647 and s>f 2147483648.0 f/ xn ] define
+"d_r" [ {xr} @ {lr} ! {xr} @ fpi f* 180.0 f/ {xr} ! ] define
+"r_d" [ {xr} @ {lr} ! {xr} @ 180.0 f* fpi f/ {xr} ! ] define
+"r_p" [ {xr} @ {lr} ! {yr} @ {xr} @ fatan2 fromrad {p1} ! {xr} @ dup f* {yr} @ dup f* f+ fsqrt {xr} ! {p1} @ {yr} ! ] define
+"p_r" [ {xr} @ {lr} ! {yr} @ torad {p1} ! {xr} @ {p1} @ fcos f* {xr} @ {p1} @ fsin f* {yr} ! {xr} ! ] define
 
 ( --- registers, taking n from the stack --- )
 "hpsto" [ regaddr {xr} @ swap ! ] define
@@ -167,6 +183,9 @@
   {af} @ 10 / 10 mod 48 + acat-ch
   {af} @ 10 mod 48 + acat-ch ] define
 
+( arcli: append integer part of X to alpha )
+"arcli" [ {xr} @ 0.0 f< if 45 acat-ch then {xr} @ fabs f>s acat-int ] define
+
 ( --- base conversion: result text goes to alpha --- )
 "decbase" [ {bb} ! cla {xr} @ f>s dup 0 < if 0 swap - then {hv} !
   0 {hn} ! begin {hv} @ {bb} @ 1 - > while
@@ -202,38 +221,68 @@
 ( --- isg: increment reg, true while value stays negative --- )
 "hpisg" [ regaddr dup @ 1.0 f+ dup rot ! 0.0 f< ] define
 
+( --- exchange X with registers and stack letters --- )
+"hpxchg" [ regaddr dup @ {xr} @ rot ! {xr} ! ] define
+"xchgz" [ {xr} @ {zr} @ {xr} ! {zr} ! ] define
+"xchgt" [ {xr} @ {tr} @ {xr} ! {tr} ! ] define
+"xchgl" [ {xr} @ {lr} @ {xr} ! {lr} ! ] define
+
+( --- flag extras --- )
+"hpfc?" [ hpfs? not ] define
+"hpfc?c" [ dup hpfs? not swap hpcf ] define
+"invf" [ {hpflg} @ -1 xor {hpflg} ! ] define
+"x<>f" [ {hpflg} @ {xr} @ f>s {hpflg} ! s>f {xr} ! ] define
+"stoflag" [ {xr} @ f>s {hpflg} ! ] define
+"rclflag" [ {hpflg} @ s>f xn ] define
+
+( --- X versus register predicates --- )
+"hpx=nn?" [ regaddr @ {xr} @ f= ] define
+"hpx!=nn?" [ regaddr @ {xr} @ f= not ] define
+"hpx<nn?" [ {xr} @ swap regaddr @ f< ] define
+"hpx<=nn?" [ {xr} @ swap regaddr @ f> not ] define
+"hpx>nn?" [ {xr} @ swap regaddr @ f> ] define
+"hpx>=nn?" [ {xr} @ swap regaddr @ f< not ] define
+
 ( --- statistics in registers 11-16, HP-41 layout --- )
+"sreg" [ {sbase} ! ] define
+"sra" [ {sbase} @ + regaddr ] define
 "cls" [
-  0.0 11 regaddr ! 0.0 12 regaddr ! 0.0 13 regaddr !
-  0.0 14 regaddr ! 0.0 15 regaddr ! 0.0 16 regaddr !
+  0.0 0 sra ! 0.0 1 sra ! 0.0 2 sra !
+  0.0 3 sra ! 0.0 4 sra ! 0.0 5 sra !
 ] define
 
 "splus" [
-  11 hpst+
-  12 regaddr dup @ {xr} @ {xr} @ f* f+ swap !
-  13 regaddr dup @ {yr} @ f+ swap !
-  14 regaddr dup @ {yr} @ {yr} @ f* f+ swap !
-  15 regaddr dup @ {xr} @ {yr} @ f* f+ swap !
-  16 regaddr dup @ 1.0 f+ swap !
-  16 regaddr @ {xr} !
+  0 sra dup @ {xr} @ f+ swap !
+  1 sra dup @ {xr} @ {xr} @ f* f+ swap !
+  2 sra dup @ {yr} @ f+ swap !
+  3 sra dup @ {yr} @ {yr} @ f* f+ swap !
+  4 sra dup @ {xr} @ {yr} @ f* f+ swap !
+  5 sra dup @ 1.0 f+ swap !
+  5 sra @ {xr} !
 ] define
 
 "sminus" [
-  11 hpst-
-  12 regaddr dup @ {xr} @ {xr} @ f* f- swap !
-  13 regaddr dup @ {yr} @ f- swap !
-  14 regaddr dup @ {yr} @ {yr} @ f* f- swap !
-  15 regaddr dup @ {xr} @ {yr} @ f* f- swap !
-  16 regaddr dup @ 1.0 f- swap !
-  16 regaddr @ {xr} !
+  0 sra dup @ {xr} @ f- swap !
+  1 sra dup @ {xr} @ {xr} @ f* f- swap !
+  2 sra dup @ {yr} @ f- swap !
+  3 sra dup @ {yr} @ {yr} @ f* f- swap !
+  4 sra dup @ {xr} @ {yr} @ f* f- swap !
+  5 sra dup @ 1.0 f- swap !
+  5 sra @ {xr} !
 ] define
 
-"mean" [ 11 regaddr @ 16 regaddr @ f/ xn ] define
+"mean" [ 0 sra @ 5 sra @ f/ xn ] define
 
 "sdev" [
-  12 regaddr @
-  11 regaddr @ 11 regaddr @ f* 16 regaddr @ f/ f-
-  16 regaddr @ 1.0 f- f/ fsqrt xn
+  1 sra @
+  0 sra @ 0 sra @ f* 5 sra @ f/ f-
+  5 sra @ 1.0 f- f/ fsqrt xn
+] define
+"correct" [
+  5 sra @ 4 sra @ f* 0 sra @ 2 sra @ f* f-
+  5 sra @ 1 sra @ f* 0 sra @ dup f* f-
+  5 sra @ 3 sra @ f* 2 sra @ dup f* f-
+  f* fsqrt f/ xn
 ] define
 
 ( --- display --- )
@@ -292,6 +341,28 @@
 "rcli?" [ {ln} @ len 8 > 0 lc@ 114 = and 1 lc@ 99 = and 2 lc@ 108 = and 3 lc@ 32 = and 4 lc@ 105 = and 5 lc@ 110 = and 6 lc@ 100 = and 7 lc@ 32 = and ] define
 "asto?" [ {ln} @ len 5 > 0 lc@ 97 = and 1 lc@ 115 = and 2 lc@ 116 = and 3 lc@ 111 = and 4 lc@ 32 = and ] define
 "arcl?" [ {ln} @ len 5 > 0 lc@ 97 = and 1 lc@ 114 = and 2 lc@ 99 = and 3 lc@ 108 = and 4 lc@ 32 = and ] define
+
+"tone?" [ {ln} @ len 5 > 0 lc@ 116 = and 1 lc@ 111 = and 2 lc@ 110 = and 3 lc@ 101 = and 4 lc@ 32 = and ] define
+"view?" [ {ln} @ len 5 > 0 lc@ 118 = and 1 lc@ 105 = and 2 lc@ 101 = and 3 lc@ 119 = and 4 lc@ 32 = and ] define
+"sreg?" [ {ln} @ len 5 > 0 lc@ 115 = and 1 lc@ 114 = and 2 lc@ 101 = and 3 lc@ 103 = and 4 lc@ 32 = and ] define
+"size?" [ {ln} @ len 5 > 0 lc@ 115 = and 1 lc@ 105 = and 2 lc@ 122 = and 3 lc@ 101 = and 4 lc@ 32 = and ] define
+"xchg?" [ {ln} @ len 4 > 0 lc@ 120 = and 1 lc@ 60 = and 2 lc@ 62 = and 3 lc@ 32 = and ] define
+"xchgarg" [ 0 {xh} ! 4 lc@ {xc} !
+  {xc} @ 121 = if xy 1 {xh} ! then
+  {xc} @ 122 = if xchgz 1 {xh} ! then
+  {xc} @ 116 = if xchgt 1 {xh} ! then
+  {xc} @ 108 = if xchgl 1 {xh} ! then
+  {xh} @ 0 = if 4 arg-at hpxchg then ] define
+
+"sf?" [ {ln} @ len 3 > 0 lc@ 115 = and 1 lc@ 102 = and 2 lc@ 32 = and ] define
+"cf?" [ {ln} @ len 3 > 0 lc@ 99 = and 1 lc@ 102 = and 2 lc@ 32 = and ] define
+"fsq?" [ {ln} @ len 4 > 0 lc@ 102 = and 1 lc@ 115 = and 2 lc@ 63 = and 3 lc@ 32 = and ] define
+"fcq?" [ {ln} @ len 4 > 0 lc@ 102 = and 1 lc@ 99 = and 2 lc@ 63 = and 3 lc@ 32 = and ] define
+"fsqc?" [ {ln} @ len 5 > 0 lc@ 102 = and 1 lc@ 115 = and 2 lc@ 63 = and 3 lc@ 99 = and 4 lc@ 32 = and ] define
+"fcqc?" [ {ln} @ len 5 > 0 lc@ 102 = and 1 lc@ 99 = and 2 lc@ 63 = and 3 lc@ 99 = and 4 lc@ 32 = and ] define
+"stx?" [ {ln} @ len 4 > 0 lc@ 115 = and 1 lc@ 116 = and 3 lc@ 32 = and
+  2 lc@ 43 = 2 lc@ 45 = or 2 lc@ 42 = or 2 lc@ 47 = or and ] define
+"yn" [ if "YES" . else "NO" . then cr ] define
 
 "xnum" [
   app-depth {d0} !
@@ -371,6 +442,86 @@
   {ln} @ "rnd" str= if hprnd 1 {hd} ! then
   {ln} @ "r^" str= if rup 1 {hd} ! then
   {ln} @ "arcl x" str= if arclx 1 {hd} ! then
+  {ln} @ "sign" str= if hpsign 1 {hd} ! then
+  {ln} @ "tenx" str= if hptenx 1 {hd} ! then
+  {ln} @ "expx1" str= if hpexpx1 1 {hd} ! then
+  {ln} @ "ln1x" str= if hpln1x 1 {hd} ! then
+  {ln} @ "root" str= if hproot 1 {hd} ! then
+  {ln} @ "recip" str= if hpinv 1 {hd} ! then
+  {ln} @ "sqr" str= if hpsq 1 {hd} ! then
+  {ln} @ "percentch" str= if hppercch 1 {hd} ! then
+  {ln} @ "rand" str= if rand 1 {hd} ! then
+  {ln} @ "lift" str= if enter 1 {hd} ! then
+  {ln} @ "grad" str= if grad 1 {hd} ! then
+  {ln} @ "d_r" str= if d_r 1 {hd} ! then
+  {ln} @ "r_d" str= if r_d 1 {hd} ! then
+  {ln} @ "p_r" str= if p_r 1 {hd} ! then
+  {ln} @ "r_p" str= if r_p 1 {hd} ! then
+  {ln} @ "d-r" str= if d_r 1 {hd} ! then
+  {ln} @ "r-d" str= if r_d 1 {hd} ! then
+  {ln} @ "p-r" str= if p_r 1 {hd} ! then
+  {ln} @ "r-p" str= if r_p 1 {hd} ! then
+  {ln} @ "invf" str= if invf 1 {hd} ! then
+  {ln} @ "x<>f" str= if x<>f 1 {hd} ! then
+  {ln} @ "stoflag" str= if stoflag 1 {hd} ! then
+  {ln} @ "rclflag" str= if rclflag 1 {hd} ! then
+  {ln} @ "ashf" str= if ashf 1 {hd} ! then
+  {ln} @ "anum" str= if anum 1 {hd} ! then
+  {ln} @ "posa" str= if posa 1 {hd} ! then
+  {ln} @ "correct" str= if correct 1 {hd} ! then
+  {ln} @ "hr" str= if hr 1 {hd} ! then
+  {ln} @ "hms" str= if hms 1 {hd} ! then
+  {ln} @ "hms+" str= if hms+ 1 {hd} ! then
+  {ln} @ "hms-" str= if hms- 1 {hd} ! then
+  {ln} @ "time" str= if time 1 {hd} ! then
+  {ln} @ "date" str= if date 1 {hd} ! then
+  {ln} @ "dow" str= if dow 1 {hd} ! then
+  {ln} @ "pse" str= if pse 1 {hd} ! then
+  {ln} @ "getkey" str= if getkey 1 {hd} ! then
+  {ln} @ "cld" str= if cld 1 {hd} ! then
+  {ln} @ "adv" str= if adv 1 {hd} ! then
+  {ln} @ "pra" str= if pra 1 {hd} ! then
+  {ln} @ "prregs" str= if prregs 1 {hd} ! then
+  {ln} @ "prflags" str= if prflags 1 {hd} ! then
+  {ln} @ "geir" str= if geir 1 {hd} ! then
+  {ln} @ "version" str= if xversion 1 {hd} ! then
+  {ln} @ "sizeq" str= if sizeq 1 {hd} ! then
+  {ln} @ "add" str= if hp+ 1 {hd} ! then
+  {ln} @ "subtract" str= if hp- 1 {hd} ! then
+  {ln} @ "multiply" str= if hp* 1 {hd} ! then
+  {ln} @ "divide" str= if hp/ 1 {hd} ! then
+  {ln} @ "beep" str= if 7 tone 1 {hd} ! then
+  {ln} @ "pi" str= if 3.141592653589793 xn 1 {hd} ! then
+  {ln} @ "arcli" str= if arcli 1 {hd} ! then
+  {ln} @ "tonexy" str= if tonexy 1 {hd} ! then
+  {ln} @ "aviewc" str= if aviewc 1 {hd} ! then
+  {ln} @ "x=0?" str= if hpx=0? yn 1 {hd} ! then
+  {ln} @ "x!=0?" str= if hpx!=0? yn 1 {hd} ! then
+  {ln} @ "x#0?" str= if hpx!=0? yn 1 {hd} ! then
+  {ln} @ "x<0?" str= if hpx<0? yn 1 {hd} ! then
+  {ln} @ "x>0?" str= if hpx>0? yn 1 {hd} ! then
+  {ln} @ "x<=0?" str= if hpx<=0? yn 1 {hd} ! then
+  {ln} @ "x>=0?" str= if hpx>=0? yn 1 {hd} ! then
+  {ln} @ "x=y?" str= if hpx=y? yn 1 {hd} ! then
+  {ln} @ "x!=y?" str= if hpx!=y? yn 1 {hd} ! then
+  {ln} @ "x#y?" str= if hpx!=y? yn 1 {hd} ! then
+  {ln} @ "x<y?" str= if hpx<y? yn 1 {hd} ! then
+  {ln} @ "x>y?" str= if hpx>y? yn 1 {hd} ! then
+  {ln} @ "x<=y?" str= if hpx<=y? yn 1 {hd} ! then
+  {ln} @ "x>=y?" str= if hpx>=y? yn 1 {hd} ! then
+  tone? if 5 arg-at tone 1 {hd} ! then
+  sf? if 3 arg-at hpsf 1 {hd} ! then
+  cf? if 3 arg-at hpcf 1 {hd} ! then
+  fsqc? if 5 arg-at hpfs?c yn 1 {hd} ! then
+  fcqc? if 5 arg-at hpfc?c yn 1 {hd} ! then
+  fsq? if 4 arg-at hpfs? yn 1 {hd} ! then
+  fcq? if 4 arg-at hpfc? yn 1 {hd} ! then
+  stx? if 4 arg-at 2 lc@ 43 = if hpst+ else 2 lc@ 45 = if hpst-
+    else 2 lc@ 42 = if hpst* else hpst/ then then then 1 {hd} ! then
+  view? if 5 arg-at view 1 {hd} ! then
+  sreg? if 5 arg-at sreg 1 {hd} ! then
+  size? if 5 arg-at hpsize 1 {hd} ! then
+  xchg? if xchgarg 1 {hd} ! then
   stoi? if 8 arg-at hpstoi 1 {hd} ! then
   rcli? if 8 arg-at hprcli 1 {hd} ! then
   asto? if 5 arg-at asto 1 {hd} ! then
@@ -380,6 +531,92 @@
   fix? if arg2 fix 1 {hd} ! then
   {hd} @ 0 = if xnum then
 ] define
+
+( --- alpha extras --- )
+"ashf" [ alen0 {n1} ! {n1} @ 7 < if cla else
+  {n1} @ 6 - {n2} ! {n2} @ anew {na} !
+  0 {i4} ! begin {i4} @ {n2} @ < while
+    {hpa} @ 22 + {i4} @ + c@ {na} @ 16 + {i4} @ + c!
+    {i4} @ 1 + {i4} ! repeat
+  0 {na} @ 16 + {n2} @ + c!
+  {na} @ {hpa} ! then ] define
+
+"posa" [ 0 {p2} ! alen0 {n1} ! 0 {i4} !
+  begin {i4} @ {n1} @ < while
+    {hpa} @ 16 + {i4} @ + c@ {xr} @ f>s = {p2} @ 0 = and if {i4} @ 1 + {p2} ! then
+    {i4} @ 1 + {i4} ! repeat
+  {xr} @ {lr} ! {p2} @ s>f {xr} ! ] define
+
+"anum" [ 0 {i4} ! alen0 {n1} ! 0 {av} ! 0 {af} ! 0 {ac} ! 0 {am} !
+  begin {i4} @ {n1} @ < while
+    {hpa} @ 16 + {i4} @ + c@ {hc} !
+    {hc} @ 47 > {hc} @ 58 < and if
+      {am} @ 2 = if
+        {ac} @ 9 < if {af} @ 10 * {hc} @ 48 - + {af} ! {ac} @ 1 + {ac} ! then
+      else {av} @ 10 * {hc} @ 48 - + {av} ! 1 {am} ! then
+    then
+    {hc} @ 46 = {am} @ 1 = and if 2 {am} ! then
+    {hc} @ 47 > {hc} @ 58 < and not {hc} @ 46 = not and {am} @ 0 > and if {n1} @ {i4} ! then
+    {i4} @ 1 + {i4} ! repeat
+  {av} @ s>f
+  {ac} @ 0 > if {af} @ s>f begin {ac} @ 0 > while 10.0 f/ {ac} @ 1 - {ac} ! repeat f+ then
+  xn ] define
+
+( --- time: rtc-backed HP time words --- )
+"hr" [ {xr} @ {lr} ! {xr} @ f>s s>f {t1} ! {xr} @ {t1} @ f- 100.0 f* {t2} !
+  {t2} @ f>s s>f {t3} ! {t2} @ {t3} @ f- 100.0 f* {t4} !
+  {t1} @ {t3} @ 60.0 f/ f+ {t4} @ 3600.0 f/ f+ {xr} ! ] define
+"hms" [ {xr} @ {lr} ! {xr} @ f>s s>f {t1} ! {xr} @ {t1} @ f- 60.0 f* {t2} !
+  {t2} @ f>s s>f {t3} ! {t2} @ {t3} @ f- 60.0 f* {t4} !
+  {t1} @ {t3} @ 100.0 f/ f+ {t4} @ 10000.0 f/ f+ {xr} ! ] define
+"hms+" [ hr {xr} @ {t5} ! hpdrop hr {xr} @ {t5} @ f+ {xr} ! hms ] define
+"hms-" [ hr {xr} @ {t5} ! hpdrop hr {xr} @ {t5} @ f- {xr} ! hms ] define
+"time" [ rtc {t3} ! {t2} ! {t1} !
+  {t3} @ s>f {t2} @ s>f 100.0 f/ f+ {t1} @ s>f 10000.0 f/ f+ xn ] define
+"date" [ rtcd {t3} ! {t2} ! {t1} !
+  {t2} @ s>f {t1} @ s>f 100.0 f/ f+ {t3} @ s>f 1000000.0 f/ f+ xn ] define
+"dow" [ rtcd {t3} ! {t2} ! {t1} !
+  {t2} @ 3 < if {t2} @ 12 + {t2} ! {t3} @ 1 - {t3} ! then
+  {t1} @ {t2} @ 1 + 13 * 5 / + {t3} @ + {t3} @ 4 / + {t3} @ 100 / - {t3} @ 400 / + 7 mod
+  6 + 7 mod s>f xn ] define
+
+( --- sound: HP tone numbers 0-9 --- )
+"tone" [ {tn} ! 440 {tf} !
+  {tn} @ 0 = if 220 {tf} ! then
+  {tn} @ 1 = if 247 {tf} ! then
+  {tn} @ 2 = if 262 {tf} ! then
+  {tn} @ 3 = if 294 {tf} ! then
+  {tn} @ 4 = if 330 {tf} ! then
+  {tn} @ 5 = if 349 {tf} ! then
+  {tn} @ 6 = if 392 {tf} ! then
+  {tn} @ 7 = if 440 {tf} ! then
+  {tn} @ 8 = if 494 {tf} ! then
+  {tn} @ 9 = if 523 {tf} ! then
+  {tf} @ 4 beep ] define
+( aviewc: aview in VGA color X )
+"aviewc" [ {xr} @ f>s 15 and color! aview 15 color! ] define
+( tonexy: frequency X Hz for Y seconds )
+"tonexy" [ {xr} @ f>s {yr} @ 18.0 f* f>s beep ] define
+"pse" [ 18 {i5} ! begin {i5} @ 0 > while waittick {i5} @ 1 - {i5} ! repeat ] define
+
+( --- keys --- )
+"getkey" [ key s>f xn ] define
+"getkeyx" [ key? s>f xn ] define
+
+( --- display and misc --- )
+"view" [ regaddr @ f. cr ] define
+"cld" [ screen-clear ] define
+"adv" [ cr ] define
+"pra" [ aview ] define
+"prregs" [ 0 {i5} ! begin {i5} @ 100 < while
+  {i5} @ regaddr @ dup 0.0 f= not if {i5} @ . 58 emit 32 emit f. cr else drop then
+  {i5} @ 1 + {i5} ! repeat ] define
+"prflags" [ {hpflg} @ . cr ] define
+"geir" [ cr "Geir Isene <g@isene.com> https://isene.com" . cr
+  "Creator of the XRPN programming language." . cr ] define
+"xversion" [ "XRPN on Simplicity OS" . cr ] define
+"hpsize" [ drop ] define
+"sizeq" [ 100.0 xn ] define
 
 ( --- dashboard: full stack always visible at the top --- )
 "clrline" [ {cy} ! 0 {cx} ! begin {cx} @ 80 < while 32 0 {cx} @ {cy} @ screen-char {cx} @ 1 + {cx} ! repeat ] define
