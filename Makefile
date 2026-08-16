@@ -18,6 +18,17 @@ IMAGE = $(BUILD_DIR)/simplicity.img
 BOOT_BIN = $(BUILD_DIR)/boot.bin
 STAGE2_BIN = $(BUILD_DIR)/stage2.bin
 KERNEL_BIN = $(BUILD_DIR)/kernel.bin
+UEFI_BIN = $(BUILD_DIR)/BOOTX64.EFI
+FONT_BIN = $(BUILD_DIR)/font8x16.bin
+ESP_DIR = $(BUILD_DIR)/esp
+
+# UEFI firmware and console font (font is optional; zeros if absent)
+OVMF = /usr/share/ovmf/OVMF.fd
+FONT_PSF = /usr/share/consolefonts/Uni2-VGA16.psf.gz
+
+# Kernel must end before the apps directory at sector 200
+# (kernel file offset 33792 + max size = 200*512)
+KERNEL_MAX = 68608
 
 # QEMU flags
 QEMU_FLAGS = -drive file=$(IMAGE),format=raw,if=ide -display curses
@@ -56,11 +67,30 @@ $(STAGE2_BIN): $(BOOT_DIR)/stage2.asm
 $(KERNEL_BIN): $(KERNEL_DIR)/simplicity.asm
 	@echo "→ Assembling kernel..."
 	$(NASM) -f bin -o $@ $<
+	@if [ $$(stat -c%s $@) -gt $(KERNEL_MAX) ]; then \
+		echo "✗ Kernel exceeds $(KERNEL_MAX) bytes; would overlap apps at sector 200!"; \
+		exit 1; \
+	fi
 	@echo "✓ Kernel assembled ($$(stat -c%s $@) bytes)"
+
+# 8x16 VGA font for the UEFI loader (extracted from a PSF1 console font)
+$(FONT_BIN): | dirs
+	@if [ -f $(FONT_PSF) ]; then \
+		zcat $(FONT_PSF) | tail -c +5 | head -c 4096 > $@; \
+	else \
+		echo "⚠ $(FONT_PSF) not found; UEFI text invisible on graphical display"; \
+		dd if=/dev/zero of=$@ bs=4096 count=1 2>/dev/null; \
+	fi
+
+# UEFI loader (PE32+ application embedding the kernel)
+$(UEFI_BIN): $(BOOT_DIR)/uefi.asm $(KERNEL_BIN) $(FONT_BIN)
+	@echo "→ Assembling UEFI loader..."
+	$(NASM) -f bin -I $(BUILD_DIR)/ -o $@ $(BOOT_DIR)/uefi.asm
+	@echo "✓ UEFI loader assembled ($$(stat -c%s $@) bytes)"
 
 # Create bootable disk image
 # Layout: [boot.bin (512B)] [padding to sector 1] [stage2.bin] [padding to 0x10000] [kernel.bin]
-$(IMAGE): $(BOOT_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
+$(IMAGE): $(BOOT_BIN) $(STAGE2_BIN) $(KERNEL_BIN) $(wildcard $(APPS_DIR)/*.forth) $(TOOLS_DIR)/pack-apps.sh
 	@echo "→ Creating disk image..."
 	@# Start with boot sector
 	@cp $(BOOT_BIN) $@
@@ -96,6 +126,20 @@ $(IMAGE): $(BOOT_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
 run: $(IMAGE)
 	@echo "→ Starting QEMU..."
 	$(QEMU) $(QEMU_FLAGS)
+
+# UEFI: stage the EFI system partition directory
+uefi: dirs $(IMAGE) $(UEFI_BIN)
+	@mkdir -p $(ESP_DIR)/EFI/BOOT
+	@cp $(UEFI_BIN) $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
+	@echo "✓ ESP staged at $(ESP_DIR) (QEMU serves it as a FAT drive)"
+
+# Run under OVMF firmware; apps still load from the IDE disk image
+run-uefi: uefi
+	@echo "→ Starting QEMU (UEFI)..."
+	$(QEMU) -bios $(OVMF) \
+		-drive file=$(IMAGE),format=raw,if=ide \
+		-drive file=fat:rw:$(ESP_DIR),format=raw,if=ide \
+		-display curses
 
 # Run in QEMU with GDB debugging
 debug: $(IMAGE)
