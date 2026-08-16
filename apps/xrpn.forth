@@ -175,7 +175,9 @@
   app-depth {d0} !
   {ln} @ eval
   app-depth {d0} @ - 0 > if
-    dup 4294967296 < over -4294967296 > and if s>f then xn
+    dup type 1 = if aset else
+      dup 4294967296 < over -4294967296 > and if s>f then xn
+    then
   then
 ] define
 
@@ -226,12 +228,12 @@
 "dline" [ {dy} ! {da} ! {dy} @ clrline 0 {dy} @ screen-set {da} @ color! . ] define
 
 "show-xrpn" [
-  "t: " 11 0 dline {tr} @ f.
-  "z: " 11 1 dline {zr} @ f.
-  "y: " 11 2 dline {yr} @ f.
-  "x: " 14 3 dline {xr} @ f.
-  "l: " 13 4 dline {lr} @ f.
-  "a: " 10 5 dline {hpa} @ 0 = not if {hpa} @ . then
+  "a: " 10 0 dline {hpa} @ 0 = not if {hpa} @ . then
+  "l: " 13 1 dline {lr} @ f.
+  "T: " 11 2 dline {tr} @ f.
+  "Z: " 11 3 dline {zr} @ f.
+  "Y: " 11 4 dline {yr} @ f.
+  "X: " 14 5 dline {xr} @ f.
   0 {cx} ! begin {cx} @ 80 < while 45 8 {cx} @ 6 screen-char {cx} @ 1 + {cx} ! repeat
 ] define
 
