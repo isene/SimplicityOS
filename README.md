@@ -223,6 +223,32 @@ User Words (Apps)           <- Applications, user definitions
 /docs      - Technical documentation
 ```
 
+## Real Hardware
+
+The reliable route is BIOS boot from a USB stick:
+
+```bash
+make install    # interactive: picks the USB device, writes the image
+```
+
+- Needs a BIOS (or UEFI with CSM) that boots USB in HDD mode with
+  LBA reads, and USB legacy keyboard support. Both are near-universal.
+- The bootloader copies the apps into a RAM disk, so everything works
+  without an ATA disk. A 64-bit CPU is checked at boot.
+- Writes (save, editor files) persist only when a real ATA/IDE disk
+  responds on the primary channel; otherwise they last until reboot.
+
+UEFI boot on real hardware:
+
+```bash
+make uefi       # builds build/esp/EFI/BOOT/BOOTX64.EFI
+```
+
+Copy the `esp` directory contents to a FAT32 USB stick and boot it.
+Works when the GPU still decodes legacy VGA and the keyboard is PS/2
+(most laptops' internal keyboards are). Machines without VGA
+compatibility show nothing; use the BIOS route there.
+
 ## Requirements
 
 - NASM (assembler)

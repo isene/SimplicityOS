@@ -101,28 +101,21 @@ Both must handle identically:
 
 Offsets are BYTE offsets from current position.
 
-## Known Defects (reviewed 2026-08-16)
+## Known Limitations (updated 2026-08-16)
 
-Verified against the kernel but not yet fixed; ordered by impact.
+Fixed in v0.5.0: dictionary overflow, execute's stale interpreter,
+the empty-stack push special cases, negative literals in define
+bodies, unbalanced control words, large-int dereference in `.`,
+REPL array literals, history aliasing, all known buffer overruns.
 
-- No memory reclamation: `free` is a stub, the heap only grows.
-  Long sessions march toward the 4MB mapped limit. The app-load
-  buffer at 3MB sits inside heap range and can be overwritten.
-- Dictionary space (8KB) overflows at boot; entries spill past the
-  buffer into free RAM. Works today, fragile tomorrow.
-- `execute` uses a stale inline copy of exec_definition: nested
-  user words and empty-stack literals misbehave. Route it through
-  exec_definition.
-- Some push-style words (`key`, `key?`, `key-*`, `varcount`,
-  `type-new`) skip advancing R15 when the stack is empty; two in a
-  row lose the first value.
-- Negative number literals inside `[ ... ] define` bodies compile
-  wrongly (bit-63 tagging ambiguity). Workaround: compute at
-  runtime, e.g. `0 1 -`.
-- Unbalanced `then`/`else`/`until`/`repeat` in a definition write
-  through whatever is on the return stack.
-- `.` treats any int >= 0x100000 as an object pointer and
-  dereferences it; unmapped values triple-fault.
-- Array literals `[ 1 2 3 ]` typed at the REPL store bit-63-tagged
-  values that only `define` untags; use `array`/`put` for data.
-- Command history cycles aliased entries after more than 10 lines.
+Still true by design or unimplemented:
+
+- `free` is a stub; the heap is a bump allocator capped at 4MB.
+  Exhaustion returns "(out of memory)" strings instead of crashing.
+- Page tables map 0-4MB only; "expand on demand" is not implemented.
+- On real hardware without an ATA drive (USB/AHCI/NVMe boot), disk
+  reads of sectors 200-447 come from the boot-loaded RAM disk;
+  writes do not persist across reboots. Editor file saves (sector
+  450+) need a real ATA drive.
+- Stack pop guards clamp against the main data stack even while an
+  app stack is active.

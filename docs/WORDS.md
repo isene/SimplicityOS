@@ -383,7 +383,8 @@ A ok
 ### execute
 **Category:** Kernel
 **Stack:** `( ref -- )`
-**Description:** Execute word reference.
+**Description:** Execute word reference. Anything that is not a word
+reference (an integer, a string, an array) pushes "(invalid reference)".
 ```forth
 > ~dup execute .s
 ```

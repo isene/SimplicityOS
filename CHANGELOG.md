@@ -1,5 +1,46 @@
 # Simplicity OS - Changelog
 
+## [0.5.0] - 2026-08-16 - Real Hardware Boot, Architectural Fixes
+
+### Real hardware
+- stage2 loads sectors 200-447 into a RAM disk at 0x28000 via INT 13h,
+  so apps load without ATA PIO (USB/AHCI/NVMe machines). The UEFI
+  loader fills the same RAM disk from an embedded copy.
+- One disk layer (disk_read_direct/disk_write_direct) with RAM-disk
+  routing, an ATA presence probe at boot, and bounded waits: a
+  machine with no ATA drive can no longer hang in a status loop.
+  Writes go through to ATA when present, so QEMU persistence stays.
+- Boot sector forces 80x25 text mode; stage2 checks CPUID for long
+  mode (halts with a message on 32-bit CPUs) and enables A20 via
+  BIOS before the fast gate.
+- README documents the two real-hardware routes (make install for
+  BIOS/USB, BOOTX64.EFI on a FAT32 stick for UEFI).
+
+### Architectural fixes (all ten remaining review findings)
+- Dictionary out of its overflowed 8KB in-image buffer to 256KB at
+  2MB, with a bounds check. Heap at 0x260000, capped: exhaustion
+  returns "(out of memory)" instead of walking into unmapped pages.
+  App buffer out of the heap. Compile buffer 8x larger at 0x240000.
+- Object classification is now "inside the live heap": printing or
+  probing large and negative integers can no longer dereference them.
+- The 14 empty-stack push special cases removed (key?, key-*,
+  varcount, type-new, ...): values are no longer silently lost.
+- execute routes colon words through the one true interpreter and
+  rejects non-references with an error string instead of executing
+  data as machine code.
+- Negative literals in define bodies compile correctly (63-bit
+  two's complement tagging). REPL array literals are usable data:
+  [ 1 2 3 ] 1 at returns 2.
+- Unbalanced then/else/until/repeat/again are ignored with a balance
+  counter instead of corrupting via the return stack.
+- app-exit resets interpreter modes; an editor session can no longer
+  leave the REPL silently compiling (the "prints nothing" bug).
+- Buffer overruns closed: definition names, save_def_source, compile
+  emits, words tables (now 512 entries / 8KB text), array collection.
+- Command history clamps to its 10 retained entries.
+- Regression words live in apps/test.forth (cfnest, cfif, cfbad,
+  negtest).
+
 ## [0.4.0] - 2026-08-16 - UEFI Boot, Kernel Hardening, Space Invaders
 
 ### UEFI Boot

@@ -63,10 +63,14 @@ RSI = Only modified during definition execution
 ```
 
 ### Memory Model (ENFORCED)
-1. **Heap starts at 2MB** - Grows upward, unbounded
-2. **No hardcoded addresses** - All pointers allocated
+1. **Dictionary at 2MB** (256KB), compile buffer at 0x240000,
+   **heap at 0x260000** growing up, capped at 4MB with graceful
+   "(out of memory)" strings
+2. **No hardcoded addresses in apps** - All pointers allocated
 3. **Object headers** - [type:8][size:8][data:N]
-4. **Page tables map as needed** - Currently 0-4MB, expand on demand
+4. **Page tables map 0-4MB** - Expansion on demand not yet implemented
+5. **RAM disk at 0x28000** - Sectors 200-447 loaded at boot; disk
+   reads in that range never touch hardware
 
 ### Type System (REQUIRED)
 ```
