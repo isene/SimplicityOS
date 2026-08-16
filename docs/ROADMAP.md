@@ -119,3 +119,16 @@ Still true by design or unimplemented:
   450+) need a real ATA drive.
 - Stack pop guards clamp against the main data stack even while an
   app stack is active.
+
+## XRPN Port Status
+
+- Stage 1 (done, v0.6.0): x87 float words in the kernel.
+- Stage 2 (done, v0.7.0): HP-41 machine model as apps/xrpn.forth
+  (stack lift, registers, flags, predicates, dse), plus
+  tools/xrpn2forth translating .xrpn programs to apps at build time.
+  apps/demo.xrpn shows a dse factorial loop and skip conditionals.
+- Not ported: alpha register ops, indirect addressing, isg,
+  statistics, EEX entry, label fall-through, mid-block rtn.
+  gto translates as a call and returns; use xeq style flow.
+- Stage 3 (open): on-OS FOCAL interpreter for interactive
+  program entry, HP-41 RAW import via the translator.

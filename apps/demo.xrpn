@@ -1,0 +1,38 @@
+# Factorial demo for the XRPN layer on Simplicity OS
+# Usage in the OS: xrpn-init 10.0 xn fact   -> prints 3628800.0000
+
+lbl "fact"
+sto 00
+1
+sto 01
+xeq "floop"
+rcl 01
+prx
+rtn
+
+lbl "floop"
+rcl 00
+st* 01
+dse 00
+gto "floop"
+rtn
+
+# Arithmetic and predicate check: (5+3)*2 = 16, then conditional
+lbl "xt1"
+5
+3
++
+2
+*
+prx
+rtn
+
+lbl "xt2"
+x>0?
+xeq "pos"
+rtn
+
+lbl "pos"
+99
+prx
+rtn

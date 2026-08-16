@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Translate an XRPN/FOCAL program to a Simplicity OS app.
+
+Each LBL "NAME" block becomes a word. Supported: numbers, arithmetic,
+unary math, sto/rcl/st+/st-/st*/st/, sf/cf/fs?, all x-comparisons,
+dse loops (predicate + gto self), gto/xeq as calls, prx/aview.
+
+Limits (documented, checked): no fall-through between labels, no
+indirect addressing, rtn only as last line of a block, one gto-self
+loop per block, no EEX number entry.
+
+Usage: xrpn2forth program.xrpn > program.forth
+"""
+import re
+import sys
+
+SIMPLE = {
+    '+': 'hp+', '-': 'hp-', '*': 'hp*', '/': 'hp/',
+    'pow': 'hppow', 'y^x': 'hppow',
+    'chs': 'hpchs', 'abs': 'hpabs', 'sqrt': 'hpsqrt',
+    'x^2': 'hpsq', 'sqr': 'hpsq', '1/x': 'hpinv',
+    'sin': 'hpsin', 'cos': 'hpcos', 'tan': 'hptan', 'atan': 'hpatan',
+    'ln': 'hpln', 'log': 'hplog', 'exp': 'hpexp', 'e^x': 'hpexp',
+    'enter': 'enter', 'rdn': 'rdn', 'rup': 'rup',
+    'swap': 'xy', 'xy': 'xy', 'x<>y': 'xy',
+    'clx': 'clx', 'clear': 'clst', 'clst': 'clst', 'clrg': 'clrg',
+    'lastx': 'lastx',
+    'prx': 'prx', 'aview': 'prx', 'prstack': 'prst',
+}
+REG_OPS = {'sto': 'hpsto', 'rcl': 'hprcl', 'st+': 'hpst+',
+           'st-': 'hpst-', 'st*': 'hpst*', 'st/': 'hpst/',
+           'sf': 'hpsf', 'cf': 'hpcf'}
+PREDICATES = {'x=0?', 'x!=0?', 'x<0?', 'x>0?', 'x<=0?', 'x>=0?',
+              'x=y?', 'x!=y?', 'x<y?', 'x>y?', 'x<=y?', 'x>=y?'}
+NUM_RE = re.compile(r'^-?\d+(\.\d+)?$')
+LBL_RE = re.compile(r'^(lbl|gto|xeq|gsb)\s+"([^"]+)"$', re.I)
+
+
+def die(msg, line=None):
+    where = f" (line: {line})" if line else ""
+    sys.exit(f"xrpn2forth: {msg}{where}")
+
+
+def label_of(line):
+    m = LBL_RE.match(line)
+    return (m.group(1).lower(), m.group(2).lower()) if m else (None, None)
+
+
+def xlate(line, in_loop_pred=False):
+    """One FOCAL line to forth tokens. Returns (tokens, is_predicate)."""
+    low = line.lower()
+    if NUM_RE.match(low):
+        val = low if '.' in low else low + '.0'
+        return f"{val} xn", False
+    if low in SIMPLE:
+        return SIMPLE[low], False
+    if low in PREDICATES:
+        return 'hp' + low, True
+    parts = low.split()
+    if len(parts) == 2:
+        op, arg = parts
+        if op in REG_OPS:
+            if not arg.isdigit():
+                die("indirect or non-numeric register unsupported", line)
+            return f"{int(arg)} {REG_OPS[op]}", False
+        if op == 'fs?':
+            if not arg.isdigit():
+                die("non-numeric flag", line)
+            return f"{int(arg)} hpfs?", True
+        if op == 'dse':
+            if not arg.isdigit():
+                die("non-numeric register", line)
+            return f"{int(arg)} hpdse", True
+    kind, name = label_of(low)
+    if kind in ('gto', 'xeq', 'gsb'):
+        return name, False
+    die("unsupported instruction", line)
+
+
+def emit_block(name, lines):
+    """Translate one label block to a define line list."""
+    # Locate gto-self for loop transform
+    self_gto = None
+    for i, ln in enumerate(lines):
+        kind, target = label_of(ln.lower())
+        if kind == 'gto' and target == name:
+            if self_gto is not None:
+                die(f"more than one gto self in {name}")
+            self_gto = i
+
+    tokens = []
+
+    def emit_seq(seq):
+        i = 0
+        while i < len(seq):
+            t, is_pred = xlate(seq[i])
+            if is_pred:
+                if i + 1 >= len(seq):
+                    die(f"predicate at end of block {name}", seq[i])
+                nxt, nxt_pred = xlate(seq[i + 1])
+                if nxt_pred:
+                    die("predicate follows predicate", seq[i + 1])
+                tokens.append(f"{t} if {nxt} then")
+                i += 2
+            else:
+                tokens.append(t)
+                i += 1
+
+    if self_gto is None:
+        body = list(lines)
+        if body and body[-1].lower() in ('rtn', 'stop', 'end'):
+            body.pop()
+        for ln in body:
+            if ln.lower() in ('rtn', 'stop'):
+                die(f"rtn/stop mid-block in {name} unsupported", ln)
+        emit_seq(body)
+    else:
+        if self_gto == 0:
+            die(f"empty loop in {name}")
+        pred_line = lines[self_gto - 1]
+        pred_tok, is_pred = xlate(pred_line)
+        head = lines[:self_gto - 1] if is_pred else lines[:self_gto]
+        rest = list(lines[self_gto + 1:])
+        if rest and rest[-1].lower() in ('rtn', 'stop', 'end'):
+            rest.pop()
+        for ln in head + rest:
+            if ln.lower() in ('rtn', 'stop'):
+                die(f"rtn/stop mid-block in {name} unsupported", ln)
+        tokens.append("begin")
+        emit_seq(head)
+        if is_pred:
+            tokens.append(f"{pred_tok} not until")
+        else:
+            tokens.append("again")
+        emit_seq(rest)
+
+    # Wrap to readable line lengths
+    out = [f'"{name}" [']
+    cur = " "
+    for t in tokens:
+        if len(cur) + len(t) > 68:
+            out.append(cur)
+            cur = " "
+        cur += " " + t
+    if cur.strip():
+        out.append(cur)
+    out.append("] define")
+    return "\n".join(out)
+
+
+def main():
+    if len(sys.argv) != 2:
+        die("usage: xrpn2forth program.xrpn")
+    lines = []
+    for raw in open(sys.argv[1]):
+        ln = raw.split('#', 1)[0].strip()
+        if ln:
+            lines.append(ln)
+
+    blocks = []          # (name, [lines])
+    cur_name, cur = None, []
+    for ln in lines:
+        kind, name = label_of(ln.lower())
+        if kind == 'lbl':
+            if cur_name:
+                blocks.append((cur_name, cur))
+            cur_name, cur = name, []
+        elif ln.lower() == 'end':
+            continue
+        else:
+            if cur_name is None:
+                die("instruction before first lbl", ln)
+            cur.append(ln)
+    if cur_name:
+        blocks.append((cur_name, cur))
+
+    # Loop blocks reference themselves; call order: emit later blocks
+    # (helpers) before earlier ones (main), matching HP listing style
+    print(f"( generated by xrpn2forth from {sys.argv[1]} )")
+    for name, body in reversed(blocks):
+        print(emit_block(name, body))
+
+
+main()

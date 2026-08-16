@@ -1,5 +1,23 @@
 # Simplicity OS - Changelog
 
+## [0.7.0] - 2026-08-16 - XRPN: HP-41 Layer
+
+Stage 2 of the XRPN port: FOCAL programs run on Simplicity OS.
+
+- apps/xrpn.forth: the HP-41 machine model as words. Stack lift
+  (xn enter rdn rup xy clx clst lastx), binary and unary math with
+  LASTX, 100 float registers (sto/rcl/st+/st-/st*/st- as hp-words),
+  flags, dse loops, twelve x-comparisons, prx/prst display
+- tools/xrpn2forth: translates .xrpn FOCAL programs to apps at
+  build time. Numbers become stack-lift entries, skip-next
+  conditionals become if/then, dse + gto self becomes begin/until,
+  xeq/gto become calls; labels become words emitted callee-first
+- apps/demo.xrpn: dse factorial (10! verified: 3628800), arithmetic
+  and skip-conditional checks
+- xrpn and demo load at boot after the apps they depend on
+- Not covered (see ROADMAP): alpha ops, indirect addressing, isg,
+  statistics, EEX, label fall-through, mid-block rtn
+
 ## [0.6.0] - 2026-08-16 - Floating Point
 
 First step of the XRPN port: the kernel speaks floats.

@@ -8494,6 +8494,14 @@ load_apps:
     mov rsi, app_name_test
     call load_app_by_cstring
 
+    ; Load xrpn runtime, then programs that use it
+    mov rsi, serial_loading_xrpn
+    call serial_print
+    mov rsi, app_name_xrpn
+    call load_app_by_cstring
+    mov rsi, app_name_demo
+    call load_app_by_cstring
+
     ; Done
     mov rsi, serial_apps_done
     call serial_print
@@ -8509,6 +8517,8 @@ app_name_editor: db 'editor', 0
 app_name_invaders: db 'invaders', 0
 app_name_hello: db 'hello', 0
 app_name_test: db 'test', 0
+app_name_xrpn: db 'xrpn', 0
+app_name_demo: db 'demo', 0
 
 ; load_app_by_cstring - Load app by C string name (for boot time)
 ; Input: RSI = pointer to null-terminated app name
@@ -8635,6 +8645,7 @@ serial_loading_hello: db 'Loading hello...', 13, 10, 0
 serial_loading_editor: db 'Loading editor...', 13, 10, 0
 serial_loading_invaders: db 'Loading invaders...', 13, 10, 0
 serial_loading_test: db 'Loading test...', 13, 10, 0
+serial_loading_xrpn: db 'Loading xrpn...', 13, 10, 0
 serial_apps_done: db 'Apps loaded OK', 13, 10, 0
 debug_if_entry: db 'IF rbp=', 0
 debug_else_entry: db 'ELSE entry, IF placeholder=', 0

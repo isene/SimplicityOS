@@ -167,6 +167,19 @@ ok
 ok
 ```
 
+### XRPN (HP-41 calculator layer)
+
+```forth
+> xrpn-init
+> 10.0 xn fact
+3628800.0000
+```
+
+Floats, the four-register X/Y/Z/T stack, 100 registers, flags and
+FOCAL-style programs. Write programs as `.xrpn` files in `apps/`;
+`tools/xrpn2forth` translates them to words at build time. See
+`apps/demo.xrpn` and docs/ROADMAP.md for what is covered.
+
 ### Space Invaders
 
 ```forth

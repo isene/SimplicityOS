@@ -95,7 +95,15 @@ $(UEFI_BIN): $(BOOT_DIR)/uefi.asm $(KERNEL_BIN) $(FONT_BIN) $(APPS_IMG)
 
 # Create bootable disk image
 # Layout: [boot.bin (512B)] [padding to sector 1] [stage2.bin] [padding to 0x10000] [kernel.bin]
-$(IMAGE): $(BOOT_BIN) $(STAGE2_BIN) $(KERNEL_BIN) $(wildcard $(APPS_DIR)/*.forth) $(TOOLS_DIR)/pack-apps.sh
+# XRPN programs translate to apps at build time
+XRPN_SRC = $(wildcard $(APPS_DIR)/*.xrpn)
+XRPN_GEN = $(XRPN_SRC:.xrpn=.forth)
+
+$(APPS_DIR)/%.forth: $(APPS_DIR)/%.xrpn $(TOOLS_DIR)/xrpn2forth
+	@echo "→ Translating $<..."
+	@$(TOOLS_DIR)/xrpn2forth $< > $@
+
+$(IMAGE): $(BOOT_BIN) $(STAGE2_BIN) $(KERNEL_BIN) $(XRPN_GEN) $(wildcard $(APPS_DIR)/*.forth) $(TOOLS_DIR)/pack-apps.sh
 	@echo "→ Creating disk image..."
 	@# Start with boot sector
 	@cp $(BOOT_BIN) $@
