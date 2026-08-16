@@ -74,3 +74,4 @@
     {k} @ 114 = if 0 {bf} ! 82 emit then
   repeat
 ] define
+"negtest" [ -7 ] define

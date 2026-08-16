@@ -16,6 +16,10 @@ start:
     ; Save boot drive (BIOS passes in DL)
     mov [boot_drive], dl
 
+    ; Force 80x25 text mode (real hardware may boot in another mode)
+    mov ax, 0x0003
+    int 0x10
+
     ; Print boot message
     mov si, msg_boot
     call print_string

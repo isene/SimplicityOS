@@ -5,6 +5,26 @@
 [BITS 64]
 [ORG 0x10000]
 
+; ============================================================
+; Physical memory map
+;   0x010000 - 0x020000  Kernel image and in-image buffers
+;   0x028000 - 0x047000  RAM disk (sectors 200-447, loaded at boot)
+;   0x060000             GDT copy (UEFI path)
+;   0x070000 - 0x073000  Page tables
+;   0x080000             Machine stack (grows down)
+;   0x090000             Return stack (grows down)
+;   0x100000 - 0x160000  App load buffer
+;   0x200000 - 0x240000  Dictionary (user definitions)
+;   0x260000 - 0x400000  Heap (bump allocator, capped)
+; ============================================================
+DICT_SPACE      equ 0x200000
+DICT_END        equ 0x240000
+HEAP_START      equ 0x260000
+HEAP_END        equ 0x400000
+RAMDISK_ADDR    equ 0x28000
+RAMDISK_FIRST   equ 200         ; First sector held in the RAM disk
+RAMDISK_COUNT   equ 248         ; Sectors 200-447
+
 long_mode_64:
     ; Setup 64-bit segments
     mov ax, 0x10
@@ -718,6 +738,14 @@ REPL:
     mov r14, 0              ; Top of stack (TOS) - empty initially
     mov rbp, 0x90000        ; Return stack (away from page tables at 0x70000) (grows down)
 
+    ; Pre-allocate the shared out-of-memory string (heap cap fallback)
+    mov rsi, str_oom
+    call create_string_from_cstr
+    mov [oom_object], rax
+
+    ; Probe for an ATA drive once (real hardware may have none)
+    call ata_detect
+
     ; Load embedded apps (defines editor, invaders words)
     call load_apps
     mov qword [app_loading], 0  ; Done loading, enable def source saving
@@ -1416,10 +1444,21 @@ allocate_object:
     add rax, 15
     and rax, ~15
 
+    ; Cap: heap exhausted returns the shared OOM string object
+    lea rbx, [rax + rcx]
+    cmp rbx, HEAP_END
+    jae .alloc_oom
+
     ; Update heap pointer
     add rcx, rax
     mov [heap_ptr], rcx
 
+    pop rcx
+    pop rbx
+    ret
+
+.alloc_oom:
+    mov rax, [oom_object]
     pop rcx
     pop rbx
     ret
@@ -1496,6 +1535,14 @@ create_dict_entry:
     push rdi
     push rsi
 
+    ; Bounds: entry = link+len+name+align+DOCOL+code+EXIT (<= code+64)
+    mov rax, [compile_ptr]
+    sub rax, compile_buffer
+    add rax, [dict_here]
+    add rax, 64
+    cmp rax, DICT_END
+    jae .dict_full
+
     mov rdi, [dict_here]
     mov r8, rdi             ; Save entry start in R8 (not RAX!)
 
@@ -1556,6 +1603,18 @@ create_dict_entry:
     pop rbx
     pop rax
     ret
+
+.dict_full:
+    mov rax, str_dict_full
+    call print_string
+    pop rsi
+    pop rdi
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+str_dict_full: db '(dictionary full)', 13, 10, 0
 
 ; Helper: Print newline
 newline:
@@ -3407,9 +3466,11 @@ word_dot:
     ; Print TOS and load new TOS
     mov rax, r14
 
-    ; Check if immediate integer (< 0x100000)
-    cmp rax, 0x100000
+    ; Object only if inside the live heap; everything else prints as int
+    cmp rax, HEAP_START
     jl .print_immediate
+    cmp rax, [heap_ptr]
+    jge .print_immediate
 
     ; Object - check type
     mov rbx, [rax]          ; Get type tag
@@ -3447,9 +3508,17 @@ word_dot:
     push rcx
     push rdi
     mov rax, [rdi]
+    ; Untag bit-63-tagged literals (REPL array collection)
+    bt rax, 63
+    jnc .arr_elem_notag
+    shl rax, 1
+    sar rax, 1
+.arr_elem_notag:
     ; Print element based on type
-    cmp rax, 0x100000
+    cmp rax, HEAP_START
     jl .arr_elem_int
+    cmp rax, [heap_ptr]
+    jge .arr_elem_int
     ; Object element - check type
     mov rbx, [rax]
     cmp rbx, TYPE_STRING
@@ -3546,8 +3615,10 @@ word_dot:
     push rcx
     push rdi
     mov rax, [rdi]
-    cmp rax, 0x100000
+    cmp rax, HEAP_START
     jl .user_elem_int
+    cmp rax, [heap_ptr]
+    jge .user_elem_int
     mov al, '.'
     call emit_char
     jmp .user_elem_done
@@ -3680,9 +3751,11 @@ word_dots:
 print_value_typed:
     push rbx
 
-    ; Check if immediate integer (< 0x100000)
-    cmp rax, 0x100000
+    ; Object only if inside the live heap
+    cmp rax, HEAP_START
     jl .print_int
+    cmp rax, [heap_ptr]
+    jge .print_int
 
     ; Object - check type
     mov rbx, [rax]
@@ -4070,7 +4143,7 @@ word_inspect:
     jz .push_unknown
 
     ; Check if dictionary or built-in
-    cmp rax, dictionary_space
+    cmp rax, DICT_SPACE
     jl .push_builtin
 
     ; Dictionary word - create STRING "(colon)"
@@ -4130,7 +4203,7 @@ word_execute:
 
     ; Check if dictionary word
     push rbx
-    cmp rax, dictionary_space
+    cmp rax, DICT_SPACE
     jl .exec_builtin
 
     mov rbx, [rax]
@@ -4254,8 +4327,10 @@ word_at:
     mov rax, [r15]          ; Array from second
 
     ; Validate: heap object, TYPE_ARRAY, index in bounds
-    cmp rax, 0x200000
+    cmp rax, HEAP_START
     jb .at_invalid
+    cmp rax, [heap_ptr]
+    jae .at_invalid
     cmp qword [rax], TYPE_ARRAY
     jne .at_invalid
     cmp rbx, [rax+8]
@@ -4264,6 +4339,12 @@ word_at:
     ; Get element: array[index]
     lea rax, [rax + 16 + rbx*8]
     mov r14, [rax]          ; Value becomes TOS
+    ; Untag bit-63-tagged literals (arrays built with [ ... ] keep tags)
+    bt r14, 63
+    jnc .at_done
+    shl r14, 1
+    sar r14, 1
+.at_done:
     ret
 
 .at_invalid:
@@ -4283,8 +4364,10 @@ word_put:
     mov rax, [r15]          ; Value from third
 
     ; Validate: heap object, TYPE_ARRAY, index in bounds
-    cmp rcx, 0x200000
+    cmp rcx, HEAP_START
     jb .put_invalid
+    cmp rcx, [heap_ptr]
+    jae .put_invalid
     cmp qword [rcx], TYPE_ARRAY
     jne .put_invalid
     cmp rbx, [rcx+8]
@@ -4333,8 +4416,10 @@ word_len:
     mov rax, r14
 
     ; Check if immediate (no length)
-    cmp rax, 0x100000
+    cmp rax, HEAP_START
     jl .len_zero
+    cmp rax, [heap_ptr]
+    jge .len_zero
 
     ; Get type
     mov rbx, [rax]
@@ -4409,8 +4494,10 @@ word_type:
     mov rax, r14
 
     ; Check if immediate integer
-    cmp rax, 0x100000
+    cmp rax, HEAP_START
     jl .type_int
+    cmp rax, [heap_ptr]
+    jge .type_int
 
     ; Get type from object header
     mov r14, [rax]
@@ -4488,8 +4575,10 @@ word_type_set:
     mov rbx, [r15-8]        ; obj from second
 
     ; Validate obj is actually an object (not immediate)
-    cmp rbx, 0x100000
+    cmp rbx, HEAP_START
     jl .ts_invalid
+    cmp rbx, [heap_ptr]
+    jge .ts_invalid
 
     ; Set new type in object header
     mov [rbx], rax
@@ -5268,16 +5357,11 @@ IDE_CMD_WRITE   equ 0x30
 ; word_disk_read - Read 512 bytes from disk sector
 ; Stack: ( sector addr -- )
 word_disk_read:
-    push rbx
-    push rcx
-    push rdx
-    push rdi
-
     ; Get addr from TOS (r14), sector from second (stack)
     mov rdi, r14            ; addr
     sub r15, 8
     mov rax, [r15]          ; sector
-    sub r15, 8              ; pop second item too (was leaked before)
+    sub r15, 8              ; pop second item too
     cmp r15, data_stack
     jl .dr_uflow
     mov r14, [r15]          ; new TOS
@@ -5286,93 +5370,17 @@ word_disk_read:
     mov r15, data_stack
     xor r14, r14
 .dr_go:
-
-    mov ecx, eax            ; Save sector BEFORE wait loop corrupts AL
-
-    ; Wait for drive ready
-    mov dx, IDE_STATUS
-.dr_wait_ready:
-    in al, dx
-    test al, 0x80           ; BSY bit
-    jnz .dr_wait_ready
-
-    ; Set up LBA addressing
-    mov dx, IDE_SECTOR_CNT
-    mov al, 1               ; Read 1 sector
-    out dx, al
-
-    mov dx, IDE_LBA_LOW
-    mov eax, ecx            ; Restore sector number
-    out dx, al              ; LBA bits 0-7
-
-    mov dx, IDE_LBA_MID
-    mov al, ah
-    out dx, al              ; LBA bits 8-15
-
-    mov dx, IDE_LBA_HIGH
-    shr ecx, 16
-    mov al, cl
-    out dx, al              ; LBA bits 16-23
-
-    mov dx, IDE_DRIVE_HEAD
-    mov al, 0xE0            ; LBA mode, master drive
-    or al, ch               ; LBA bits 24-27 (in low nibble)
-    and al, 0xEF            ; Ensure only bits 0-3 used
-    out dx, al
-
-    ; Send read command
-    mov dx, IDE_COMMAND
-    mov al, IDE_CMD_READ
-    out dx, al
-
-    ; Wait for data ready
-    mov dx, IDE_STATUS
-.dr_wait_drq:
-    in al, dx
-    test al, 0x01           ; ERR bit
-    jnz .dr_error
-    test al, 0x08           ; DRQ bit
-    jz .dr_wait_drq
-
-    ; Read 256 words (512 bytes)
-    mov dx, IDE_DATA
-    mov rcx, 256
-.dr_read_loop:
-    in ax, dx
-    stosw                   ; Store word, advance rdi
-    dec rcx
-    jnz .dr_read_loop
-
-    pop rdi
-    pop rdx
-    pop rcx
-    pop rbx
-    ret
-
-.dr_error:
-    ; On error, fill with zeros
-    xor eax, eax
-    mov rcx, 256
-    rep stosw
-    pop rdi
-    pop rdx
-    pop rcx
-    pop rbx
+    call disk_read_direct
     ret
 
 ; word_disk_write - Write 512 bytes to disk sector
 ; Stack: ( addr sector -- )
 word_disk_write:
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-
     ; Get sector from TOS (r14), addr from second (stack)
     mov rax, r14            ; sector
     sub r15, 8
     mov rsi, [r15]          ; addr
-    sub r15, 8              ; pop second item too (was leaked before)
+    sub r15, 8              ; pop second item too
     cmp r15, data_stack
     jl .dw_uflow
     mov r14, [r15]          ; new TOS
@@ -5381,92 +5389,13 @@ word_disk_write:
     mov r15, data_stack
     xor r14, r14
 .dw_go:
-
-    mov ecx, eax            ; Save sector BEFORE wait loop corrupts AL
-
-    ; Wait for drive ready
-    mov dx, IDE_STATUS
-.dw_wait_ready:
-    in al, dx
-    test al, 0x80           ; BSY bit
-    jnz .dw_wait_ready
-
-    ; Set up LBA addressing
-    mov dx, IDE_SECTOR_CNT
-    mov al, 1               ; Write 1 sector
-    out dx, al
-
-    mov dx, IDE_LBA_LOW
-    mov eax, ecx
-    out dx, al              ; LBA bits 0-7
-
-    mov dx, IDE_LBA_MID
-    mov al, ah
-    out dx, al              ; LBA bits 8-15
-
-    mov dx, IDE_LBA_HIGH
-    shr eax, 16
-    out dx, al              ; LBA bits 16-23
-
-    mov dx, IDE_DRIVE_HEAD
-    mov al, 0xE0            ; LBA mode, master drive
-    shr eax, 8
-    and al, 0x0F            ; LBA bits 24-27
-    or al, 0xE0
-    out dx, al
-
-    ; Send write command
-    mov dx, IDE_COMMAND
-    mov al, IDE_CMD_WRITE
-    out dx, al
-
-    ; Wait for drive ready to accept data
-    mov dx, IDE_STATUS
-.dw_wait_drq:
-    in al, dx
-    test al, 0x01           ; ERR bit
-    jnz .dw_error
-    test al, 0x08           ; DRQ bit
-    jz .dw_wait_drq
-
-    ; Write 256 words (512 bytes)
-    mov dx, IDE_DATA
-    mov rcx, 256
-.dw_write_loop:
-    lodsw                   ; Load word from rsi, advance rsi
-    out dx, ax
-    dec rcx
-    jnz .dw_write_loop
-
-    ; Flush cache
-    mov dx, IDE_COMMAND
-    mov al, 0xE7            ; CACHE FLUSH command
-    out dx, al
-
-    ; Wait for completion
-    mov dx, IDE_STATUS
-.dw_wait_flush:
-    in al, dx
-    test al, 0x80           ; BSY bit
-    jnz .dw_wait_flush
-
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rbx
-    ret
-
-.dw_error:
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rbx
+    call disk_write_direct
     ret
 
 ; ============================================================
 ; SAVE - Save user definitions source to disk
 ; Stack: ( -- )
-; Writes def_src_buffer (8 sectors = 4KB) to sector 250+
+; Writes def_src_buffer (8 sectors = 4KB) to DEF_SAVE_SECTOR+
 ; ============================================================
 word_save:
     push rbx
@@ -5517,7 +5446,7 @@ str_done: db ' ok', 0
 ; ============================================================
 ; RESTORE - Load user definitions from disk and interpret
 ; Stack: ( -- )
-; Reads from sector 250+ into def_src_buffer, then interprets
+; Reads from DEF_SAVE_SECTOR+ into def_src_buffer, then interprets
 ; ============================================================
 word_restore:
     push rbx
@@ -6012,6 +5941,18 @@ str_removed: db 'Removed', 0
 str_remove_notfound: db 'Word not found', 0
 str_remove_needstr: db 'remove requires STRING', 0
 
+; sort_is_obj: R11 = value; CF=1 if heap object; clobbers only flags
+sort_is_obj:
+    cmp r11, HEAP_START
+    jl .sio_no                  ; Signed: negative values are ints
+    cmp r11, [heap_ptr]
+    jge .sio_no
+    stc
+    ret
+.sio_no:
+    clc
+    ret
+
 ; ============================================================
 ; SORT - Sort an array in place
 ; Stack: ( array -- array )
@@ -6061,11 +6002,13 @@ word_sort:
     mov rdi, [r9 + rax + 8]     ; elem2 = arr[i]
 
     ; Determine comparison type
-    ; Check if both are immediate integers
-    cmp rsi, 0x100000
-    jae .sort_obj_cmp
-    cmp rdi, 0x100000
-    jae .sort_obj_cmp
+    ; Check if both are immediate integers (heap-range test, signed)
+    mov r11, rsi
+    call sort_is_obj
+    jc .sort_obj_cmp
+    mov r11, rdi
+    call sort_is_obj
+    jc .sort_obj_cmp
 
     ; Both immediate integers - simple numeric compare
     cmp rsi, rdi
@@ -6074,10 +6017,12 @@ word_sort:
 
 .sort_obj_cmp:
     ; At least one is an object - compare as strings if both STRING
-    cmp rsi, 0x100000
-    jb .sort_mixed              ; elem1 is int
-    cmp rdi, 0x100000
-    jb .sort_mixed              ; elem2 is int
+    mov r11, rsi
+    call sort_is_obj
+    jnc .sort_mixed             ; elem1 is int
+    mov r11, rdi
+    call sort_is_obj
+    jnc .sort_mixed             ; elem2 is int
 
     ; Both objects - check if both strings
     mov rbx, [rsi]              ; type1
@@ -6134,8 +6079,9 @@ word_sort:
 
 .sort_mixed:
     ; Mixed types: integers sort before objects
-    cmp rsi, 0x100000
-    jb .sort_no_swap            ; int < obj, already correct
+    mov r11, rsi
+    call sort_is_obj
+    jnc .sort_no_swap           ; int < obj, already correct
     jmp .sort_do_swap           ; obj > int, swap
 
 .sort_by_addr:
@@ -6328,53 +6274,83 @@ remove_def_from_buffer:
 ; disk_read_direct - Read 512 bytes
 ; Input: EAX = sector, RDI = destination address
 disk_read_direct:
+    ; Input: RAX = sector, RDI = destination. Preserves all registers.
+    ; Sectors 200-447 come from the boot-loaded RAM disk (works without
+    ; any ATA drive, e.g. real hardware booted from USB). Other sectors
+    ; use ATA PIO; zero-fill on missing drive, error or timeout.
+    push rax
     push rbx
     push rcx
     push rdx
+    push rsi
+    push rdi
 
-    mov ecx, eax                ; Save sector BEFORE wait loop corrupts AL
+    cmp rax, RAMDISK_FIRST
+    jb .drd_ata
+    cmp rax, RAMDISK_FIRST + RAMDISK_COUNT
+    jae .drd_ata
+    sub rax, RAMDISK_FIRST
+    shl rax, 9
+    lea rsi, [rax + RAMDISK_ADDR]
+    mov rcx, 64
+    rep movsq
+    jmp .drd_done
 
-    ; Wait for drive ready
+.drd_ata:
+    cmp byte [ata_present], 0
+    je .drd_zero
+
+    mov ecx, eax                ; Save sector
+
+    ; Wait for drive ready (bounded)
     mov dx, IDE_STATUS
+    mov rbx, 1000000
 .drd_wait:
     in al, dx
     test al, 0x80
+    jz .drd_ready
+    dec rbx
     jnz .drd_wait
+    jmp .drd_zero
+.drd_ready:
 
-    ; Set up LBA
     mov dx, IDE_SECTOR_CNT
     mov al, 1
     out dx, al
-
     mov dx, IDE_LBA_LOW
     mov eax, ecx
     out dx, al
-
     mov dx, IDE_LBA_MID
     mov al, ah
     out dx, al
-
     mov dx, IDE_LBA_HIGH
+    mov eax, ecx
     shr eax, 16
     out dx, al
-
     mov dx, IDE_DRIVE_HEAD
-    mov al, 0xE0
+    mov eax, ecx
+    shr eax, 24
+    and al, 0x0F
+    or al, 0xE0                 ; LBA mode, master, bits 24-27
     out dx, al
 
-    ; Read command
     mov dx, IDE_COMMAND
     mov al, IDE_CMD_READ
     out dx, al
 
-    ; Wait for data
+    ; Wait for data (bounded, error-aware)
     mov dx, IDE_STATUS
+    mov rbx, 1000000
 .drd_drq:
     in al, dx
-    test al, 0x08
-    jz .drd_drq
-
-    ; Read 256 words
+    test al, 0x01               ; ERR
+    jnz .drd_zero
+    test al, 0x08               ; DRQ
+    jnz .drd_data
+    dec rbx
+    jnz .drd_drq
+    jmp .drd_zero
+.drd_data:
     mov dx, IDE_DATA
     mov rcx, 256
 .drd_loop:
@@ -6382,62 +6358,103 @@ disk_read_direct:
     stosw
     dec rcx
     jnz .drd_loop
+    jmp .drd_done
 
+.drd_zero:
+    xor eax, eax
+    mov rcx, 64
+    rep stosq
+
+.drd_done:
+    pop rdi
+    pop rsi
     pop rdx
     pop rcx
     pop rbx
+    pop rax
     ret
 
 ; disk_write_direct - Write 512 bytes
-; Input: EAX = sector, RSI = source address
+; Input: RAX = sector, RSI = source address. Preserves all registers.
+; Sectors 200-447 are written to the RAM disk AND to ATA when a drive
+; exists (write-through keeps QEMU persistence). Other sectors: ATA only.
 disk_write_direct:
+    push rax
     push rbx
     push rcx
     push rdx
+    push rsi
+    push rdi
 
-    mov ecx, eax                ; Save sector BEFORE wait loop corrupts AL
+    cmp rax, RAMDISK_FIRST
+    jb .dwd_ata
+    cmp rax, RAMDISK_FIRST + RAMDISK_COUNT
+    jae .dwd_ata
+    push rax
+    push rsi
+    sub rax, RAMDISK_FIRST
+    shl rax, 9
+    lea rdi, [rax + RAMDISK_ADDR]
+    mov rcx, 64
+    rep movsq
+    pop rsi
+    pop rax
 
-    ; Wait for drive ready
+.dwd_ata:
+    cmp byte [ata_present], 0
+    je .dwd_done
+
+    mov ecx, eax                ; Save sector
+
+    ; Wait for drive ready (bounded)
     mov dx, IDE_STATUS
+    mov rbx, 1000000
 .dwd_wait:
     in al, dx
     test al, 0x80
+    jz .dwd_ready
+    dec rbx
     jnz .dwd_wait
+    jmp .dwd_done
+.dwd_ready:
 
-    ; Set up LBA
     mov dx, IDE_SECTOR_CNT
     mov al, 1
     out dx, al
-
     mov dx, IDE_LBA_LOW
     mov eax, ecx
     out dx, al
-
     mov dx, IDE_LBA_MID
     mov al, ah
     out dx, al
-
     mov dx, IDE_LBA_HIGH
+    mov eax, ecx
     shr eax, 16
     out dx, al
-
     mov dx, IDE_DRIVE_HEAD
-    mov al, 0xE0
+    mov eax, ecx
+    shr eax, 24
+    and al, 0x0F
+    or al, 0xE0
     out dx, al
 
-    ; Write command
     mov dx, IDE_COMMAND
     mov al, IDE_CMD_WRITE
     out dx, al
 
-    ; Wait for DRQ
+    ; Wait for DRQ (bounded)
     mov dx, IDE_STATUS
+    mov rbx, 1000000
 .dwd_drq:
     in al, dx
+    test al, 0x01
+    jnz .dwd_done
     test al, 0x08
-    jz .dwd_drq
-
-    ; Write 256 words
+    jnz .dwd_data
+    dec rbx
+    jnz .dwd_drq
+    jmp .dwd_done
+.dwd_data:
     mov dx, IDE_DATA
     mov rcx, 256
 .dwd_loop:
@@ -6446,21 +6463,43 @@ disk_write_direct:
     dec rcx
     jnz .dwd_loop
 
-    ; Flush
+    ; Flush cache (bounded)
     mov dx, IDE_COMMAND
     mov al, 0xE7
     out dx, al
-
     mov dx, IDE_STATUS
+    mov rbx, 1000000
 .dwd_flush:
     in al, dx
     test al, 0x80
+    jz .dwd_done
+    dec rbx
     jnz .dwd_flush
 
+.dwd_done:
+    pop rdi
+    pop rsi
     pop rdx
     pop rcx
     pop rbx
+    pop rax
     ret
+
+; ata_detect - Probe primary ATA once at boot; sets ata_present
+ata_detect:
+    push rax
+    push rdx
+    mov dx, IDE_STATUS
+    in al, dx
+    cmp al, 0xFF                ; Floating bus: no drive
+    je .ad_none
+    mov byte [ata_present], 1
+.ad_none:
+    pop rdx
+    pop rax
+    ret
+
+ata_present: db 0
 
 ; ============================================================
 ; LOAD - Load and run app from disk
@@ -6474,7 +6513,7 @@ disk_write_direct:
 ; ============================================================
 
 APP_DIR_SECTOR  equ 200
-APP_BUFFER_ADDR equ 0x300000    ; 3MB - buffer for loading apps
+APP_BUFFER_ADDR equ 0x100000    ; 1MB - buffer for loading apps (see memory map)
 
 word_load:
     push rbx
@@ -6601,78 +6640,10 @@ word_load:
     call print_string
     jmp .load_done
 
-; Helper: Read sector to address
+; Helper: Read sector to address (RAM-disk aware)
 ; Input: RAX = sector, RDI = destination address
 read_sector_to_addr:
-    push rbx
-    push rcx
-    push rdx
-    push rdi
-
-    ; Save sector number BEFORE status reads corrupt AL
-    mov rbx, rax
-
-    ; Wait for drive ready
-    mov dx, IDE_STATUS
-.rsta_wait:
-    in al, dx
-    test al, 0x80
-    jnz .rsta_wait
-    test al, 0x40
-    jz .rsta_wait
-
-    ; Set up LBA (sector number is in RBX)
-    mov dx, IDE_SECTOR_CNT
-    mov al, 1
-    out dx, al
-
-    mov dx, IDE_LBA_LOW
-    mov rax, rbx
-    out dx, al
-
-    mov dx, IDE_LBA_MID
-    mov al, ah
-    out dx, al
-
-    mov dx, IDE_LBA_HIGH
-    shr rax, 16
-    out dx, al
-
-    mov dx, IDE_DRIVE_HEAD
-    shr rax, 8
-    and al, 0x0F
-    or al, 0xE0
-    out dx, al
-
-    ; Send read command
-    mov dx, IDE_COMMAND
-    mov al, IDE_CMD_READ
-    out dx, al
-
-    ; Wait for data ready
-    mov dx, IDE_STATUS
-.rsta_wait_data:
-    in al, dx
-    test al, 0x80
-    jnz .rsta_wait_data
-    test al, 0x08
-    jz .rsta_wait_data
-
-    ; Read 256 words
-    pop rdi
-    push rdi
-    mov dx, IDE_DATA
-    mov rcx, 256
-.rsta_read_loop:
-    in ax, dx
-    stosw
-    dec rcx
-    jnz .rsta_read_loop
-
-    pop rdi
-    pop rdx
-    pop rcx
-    pop rbx
+    call disk_read_direct
     ret
 
 str_app_not_found: db 'App not found', 13, 10, 0
@@ -6886,8 +6857,9 @@ word_define:
     ; Only reach here if bit 63 was NOT set, so true negatives won't exist here
     ; (negative numbers are tagged, and we handled that above)
 
-    ; Check if heap object (>= 0x200000) - also a literal
-    cmp rax, 0x200000
+    ; Check if heap object (>= HEAP_START) - also a literal
+    ; (dictionary entries at DICT_SPACE..DICT_END stay code references)
+    cmp rax, HEAP_START
     jae .define_is_literal
 
     ; It's a code reference - check if control flow immediate
@@ -6921,14 +6893,10 @@ word_define:
     jmp .define_next_element
 
 .define_is_tagged_literal:
-    ; Bit 63 is set - could be tagged positive OR natural negative
-    ; Clear bit 63 and check if result is still negative
-    mov rbx, rax                ; Save original
-    btr rax, 63                 ; Clear bit 63
-    test rax, rax
-    jns .define_is_literal      ; If now positive, it was tagged - use cleared value
-    ; Still appears negative after clearing bit 63 means it was truly negative
-    mov rax, rbx                ; Restore original negative value
+    ; Tagged literal: bit 63 set, value is 63-bit two's complement.
+    ; Untag = drop bit 63, sign-extend from bit 62 (shl+sar does both).
+    shl rax, 1
+    sar rax, 1
     ; Fall through to wrap with LIT
 
 .define_is_literal:
@@ -7012,7 +6980,7 @@ word_see:
     jz .not_found
 
     ; Check if dictionary word
-    cmp rax, dictionary_space
+    cmp rax, DICT_SPACE
     jl .is_builtin
 
     ; Print ": name (colon def)"
@@ -7282,9 +7250,12 @@ interpret_line:
     ; Array mode - store reference to collection buffer
     push rbx
     mov rbx, [array_collect_ptr]
+    cmp rbx, array_collect_buffer + 4096
+    jae .iline_ref_full
     mov [rbx], rax              ; Store reference
     add rbx, 8
     mov [array_collect_ptr], rbx
+.iline_ref_full:
     pop rbx
     jmp .iline_parse_loop
 
@@ -7340,17 +7311,18 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_number_to_array:
-    ; Store number in collection buffer
-    ; Only tag positive numbers with bit 63 (negative numbers already have it set)
+    ; Store number in collection buffer, tagged with bit 63.
+    ; Values are 63-bit two's complement; define/at untag with shl+sar.
+    ; (bts on a negative is a no-op: bit 63 is already set.)
     push rbx
     mov rbx, [array_collect_ptr]
-    test rax, rax
-    js .iline_number_store      ; Skip tagging for negative numbers
-    bts rax, 63                 ; Set bit 63 to tag positive numbers as literal
-.iline_number_store:
+    cmp rbx, array_collect_buffer + 4096
+    jae .iline_number_full      ; Buffer full: drop element
+    bts rax, 63
     mov [rbx], rax
     add rbx, 8
     mov [array_collect_ptr], rbx
+.iline_number_full:
     pop rbx
     jmp .iline_parse_loop
 
@@ -7447,10 +7419,13 @@ interpret_line:
     ; define will wrap it with LIT when processing
     push rbx
     mov rbx, [array_collect_ptr]
+    cmp rbx, array_collect_buffer + 4096
+    jae .iline_var_full
     bts rax, 63                 ; Set bit 63 to tag as literal
     mov [rbx], rax
     add rbx, 8
     mov [array_collect_ptr], rbx
+.iline_var_full:
     pop rbx
     jmp .iline_parse_loop
 
@@ -7540,9 +7515,12 @@ interpret_line:
     ; Store string in collection buffer
     push rbx
     mov rbx, [array_collect_ptr]
+    cmp rbx, array_collect_buffer + 4096
+    jae .iline_str_full
     mov [rbx], rax              ; Store string object address
     add rbx, 8
     mov [array_collect_ptr], rbx
+.iline_str_full:
     pop rbx
     jmp .iline_parse_loop
 
@@ -7658,7 +7636,7 @@ exec_definition:
 
 .exec_not_zbranch:
     ; Check if nested dictionary word
-    cmp rax, dictionary_space
+    cmp rax, DICT_SPACE
     jb .exec_is_builtin         ; Use unsigned comparison for addresses
     mov rcx, [dict_here]
     cmp rax, rcx
@@ -7989,7 +7967,7 @@ array_mode: db 0                ; 1 if inside array literal, 0 otherwise
 compile_mode: db 0              ; 0 = interpret, 1 = compile
 array_collect_buffer: times 512 dq 0  ; Temporary buffer for array collection (512 elements max)
 array_collect_ptr: dq 0         ; Pointer into collection buffer
-dict_here: dq dictionary_space  ; Next free space in dictionary
+dict_here: dq DICT_SPACE  ; Next free space in dictionary
 dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)
 compile_buffer: times 512 dq 0  ; Compilation buffer (512 cells)
 compile_ptr: dq compile_buffer  ; Current compilation position
@@ -7998,8 +7976,9 @@ string_pool: times 2048 db 0    ; Temporary string pool
 string_here: dq string_pool     ; Next free space
 
 ; Object model
-heap_start: dq 0x200000         ; Heap starts at 2MB
-heap_ptr: dq 0x200000           ; Current heap position
+heap_start: dq HEAP_START       ; Heap start (after dictionary)
+heap_ptr: dq HEAP_START         ; Current heap position
+oom_object: dq 0                ; Pre-allocated "(out of memory)" STRING
 
 ; Type tags
 TYPE_INT equ 0
@@ -8020,8 +7999,7 @@ named_var_count: dq 0
 
 cursor: dq 0xB8000 + 160
 
-; Dictionary space (8KB for user-defined words)
-dictionary_space: times 8192 db 0
+; Dictionary lives at DICT_SPACE (256KB); see memory map at top
 
 ; Definition source storage (for SAVE/LOAD persistence)
 def_src_buffer: times 4096 db 0     ; Stores source text of definitions
@@ -8030,3 +8008,4 @@ DEF_SAVE_SECTOR equ 400             ; Disk sector for saved definitions
                                     ; (apps own 200-399, editor owns 450+)
 
 msg64: db 'Simplicity v0.1 - 64-bit RPN "Lego" OS (v1.0 = Doom!)', 0
+str_oom: db '(out of memory)', 0

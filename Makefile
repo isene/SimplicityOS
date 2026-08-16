@@ -82,8 +82,13 @@ $(FONT_BIN): | dirs
 		dd if=/dev/zero of=$@ bs=4096 count=1 2>/dev/null; \
 	fi
 
-# UEFI loader (PE32+ application embedding the kernel)
-$(UEFI_BIN): $(BOOT_DIR)/uefi.asm $(KERNEL_BIN) $(FONT_BIN)
+# Apps region (sectors 200-447) extracted for UEFI embedding
+APPS_IMG = $(BUILD_DIR)/apps.img
+$(APPS_IMG): $(IMAGE)
+	@dd if=$(IMAGE) of=$@ bs=512 skip=200 count=248 2>/dev/null
+
+# UEFI loader (PE32+ application embedding kernel, font and apps)
+$(UEFI_BIN): $(BOOT_DIR)/uefi.asm $(KERNEL_BIN) $(FONT_BIN) $(APPS_IMG)
 	@echo "→ Assembling UEFI loader..."
 	$(NASM) -f bin -I $(BUILD_DIR)/ -o $@ $(BOOT_DIR)/uefi.asm
 	@echo "✓ UEFI loader assembled ($$(stat -c%s $@) bytes)"

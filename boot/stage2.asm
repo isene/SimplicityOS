@@ -6,7 +6,48 @@
 [ORG 0x7E00]
 
 stage2_start:
-    ; Enable A20
+    ; Save boot drive (DL preserved from boot sector's INT 13h calls)
+    mov [boot_drive2], dl
+
+    ; Require a 64-bit CPU before touching long-mode machinery
+    mov eax, 0x80000000
+    cpuid
+    cmp eax, 0x80000001
+    jb no_long_mode
+    mov eax, 0x80000001
+    cpuid
+    test edx, 1 << 29           ; LM bit
+    jz no_long_mode
+
+    ; Load RAM disk: sectors 200-447 to 0x28000 so apps work without
+    ; ATA PIO (real hardware booted from USB/AHCI). 32-sector chunks
+    ; at 16KB-aligned addresses avoid 64KB DMA boundary crossings.
+.rd_loop:
+    mov ax, [rd_remaining]
+    test ax, ax
+    jz .rd_done
+    cmp ax, 32
+    jbe .rd_have
+    mov ax, 32
+.rd_have:
+    mov [rd_dap_cnt], ax
+    push ax
+    mov ah, 0x42
+    mov dl, [boot_drive2]
+    mov si, rd_dap
+    int 0x13
+    pop ax
+    jc .rd_done                 ; On error: boot continues, apps absent
+    sub [rd_remaining], ax
+    add word [rd_dap_lba], ax
+    shl ax, 5                   ; 32 paragraphs per sector
+    add [rd_dap_seg], ax
+    jmp .rd_loop
+.rd_done:
+
+    ; Enable A20: BIOS service first, fast gate as fallback
+    mov ax, 0x2401
+    int 0x15
     in al, 0x92
     or al, 2
     out 0x92, al
@@ -169,5 +210,35 @@ gdt64_descriptor:
 
 msg: db 'Stage2: Transitioning to 64-bit...', 0
 
-; Pad to known size (512 bytes minimum, but we need more for GDT)
-times 512-($-$$) db 0
+; ============================================================
+; Real-mode helpers and data
+; ============================================================
+[BITS 16]
+no_long_mode:
+    mov si, msg_no64
+.nl_print:
+    lodsb
+    test al, al
+    jz .nl_halt
+    mov ah, 0x0E
+    int 0x10
+    jmp .nl_print
+.nl_halt:
+    hlt
+    jmp .nl_halt
+
+msg_no64: db '64-bit CPU required', 13, 10, 0
+boot_drive2: db 0
+
+; Disk Address Packet for the RAM-disk load (updated in place)
+align 4
+rd_dap:
+    db 16, 0
+rd_dap_cnt: dw 0                ; Sectors this transfer
+rd_dap_off: dw 0                ; Offset (always 0)
+rd_dap_seg: dw 0x2800           ; Segment (0x2800:0 = 0x28000)
+rd_dap_lba: dq 200              ; Current LBA
+rd_remaining: dw 248            ; Sectors left to load
+
+; Pad to sector multiple (image layout gives stage2 up to 33KB)
+times 1024-($-$$) db 0

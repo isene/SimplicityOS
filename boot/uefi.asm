@@ -178,6 +178,12 @@ efi_main:
     mov rcx, (kernel_end - kernel_blob + 7) / 8
     rep movsq
 
+    ; Copy embedded apps (disk sectors 200-447) to the RAM disk area
+    lea rsi, [apps_blob]
+    mov rdi, 0x28000
+    mov rcx, (apps_end - apps_blob + 7) / 8
+    rep movsq
+
     call vga_text_mode
 
     mov rax, KERNEL_ADDR
@@ -396,6 +402,10 @@ font_blob:   incbin "font8x16.bin"
 align 8
 kernel_blob: incbin "kernel.bin"
 kernel_end:
+
+align 8
+apps_blob:   incbin "apps.img"
+apps_end:
 
     times ((($ - text_file) + FILE_ALIGN - 1) / FILE_ALIGN) * FILE_ALIGN - ($ - text_file) db 0
 text_end:
