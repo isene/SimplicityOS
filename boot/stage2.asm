@@ -32,9 +32,9 @@ prot_mode:
     mov ss, ax
     mov esp, 0x90000
 
-    ; Clear screen
+    ; Clear screen (2000 cells = 1000 dwords)
     mov edi, 0xB8000
-    mov ecx, 80*25
+    mov ecx, 1000
     mov eax, 0x0F200F20
     rep stosd
 

@@ -27,6 +27,8 @@ fi
 DIR_SECTOR=200
 DIR_OFFSET=$((DIR_SECTOR * 512))
 DATA_START_SECTOR=201
+DATA_END_SECTOR=399     # 400+ reserved: saved definitions (400), editor (450+)
+MAX_ENTRIES=32
 
 # Create directory sector (512 bytes of zeros initially)
 dd if=/dev/zero of=/tmp/app_dir.bin bs=512 count=1 2>/dev/null
@@ -41,6 +43,15 @@ for app in "$APPS_DIR"/*.forth; do
     name=$(basename "$app" .forth)
     size=$(stat -c%s "$app")
     sectors=$(( (size + 511) / 512 ))
+
+    if [ $((current_sector + sectors - 1)) -gt $DATA_END_SECTOR ]; then
+        echo "  ✗ $name would extend past sector $DATA_END_SECTOR (app area full)"
+        exit 1
+    fi
+    if [ $((entry_offset / 16)) -ge $MAX_ENTRIES ]; then
+        echo "  ✗ Too many apps (max $MAX_ENTRIES directory entries)"
+        exit 1
+    fi
 
     echo "  Packing: $name ($size bytes, $sectors sectors at sector $current_sector)"
 

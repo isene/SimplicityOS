@@ -49,8 +49,10 @@
 
 "move-cursor" [ {editor-x} @ {editor-y} @ screen-set ] define
 
-"read-dir" [ 250 {dir-buffer} @ disk-read ] define
-"write-dir" [ {dir-buffer} @ 250 disk-write ] define
+( Editor disk area: directory at 450, files from 460 )
+( Apps own 200-399, saved definitions own 400-407 )
+"read-dir" [ 450 {dir-buffer} @ disk-read ] define
+"write-dir" [ {dir-buffer} @ 450 disk-write ] define
 
 "entry-addr" [ 32 * {dir-buffer} @ + ] define
 "entry-name" [ entry-addr ] define
@@ -148,7 +150,7 @@
 ] define
 
 "next-free-sector" [
-  300 {nfs-max} !
+  460 {nfs-max} !
   0 check-entry-sector
   1 check-entry-sector
   2 check-entry-sector

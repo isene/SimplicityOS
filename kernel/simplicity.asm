@@ -12,10 +12,10 @@ long_mode_64:
     mov es, ax
     mov ss, ax
 
-    ; Clear screen in 64-bit mode
+    ; Clear screen in 64-bit mode (2000 cells = 500 qwords)
     mov rdi, 0xB8000
-    mov rcx, 2000
-    mov rax, 0x0F200F20
+    mov rcx, 500
+    mov rax, 0x0F200F200F200F20
     rep stosq
 
     ; Print message
@@ -736,18 +736,10 @@ REPL:
 .read_char:
     call wait_key                   ; Get character in RAX
 
-    cmp al, 10                      ; Enter?
-    je .execute_line
-
-    cmp al, 8                       ; Backspace?
-    je .handle_backspace
-
-    cmp al, 127                     ; Delete (ASCII)?
-    je .handle_delete
+    ; Handle extended keys (>= 256) on full RAX first, so their low
+    ; byte can never alias ASCII (e.g. KEY_PGDN=264 has AL=8)
     cmp rax, KEY_DELETE             ; Delete key (scancode)
     je .handle_delete
-
-    ; Arrow keys (KEY_UP=257, KEY_DOWN=258, KEY_LEFT=259, KEY_RIGHT=260)
     cmp rax, KEY_UP
     je .arrow_up
     cmp rax, KEY_DOWN
@@ -756,6 +748,17 @@ REPL:
     je .arrow_left
     cmp rax, KEY_RIGHT
     je .arrow_right
+    cmp rax, 256                    ; Other extended keys: ignore
+    jae .read_char
+
+    cmp al, 10                      ; Enter?
+    je .execute_line
+
+    cmp al, 8                       ; Backspace?
+    je .handle_backspace
+
+    cmp al, 127                     ; Delete (ASCII)?
+    je .handle_delete
 
     cmp al, 32                      ; Printable?
     jl .read_char                   ; Ignore other control chars
@@ -3219,15 +3222,28 @@ lookup_word:
     ret
 
 ; Word implementations for REPL (using R15 as data stack)
+; Shared underflow handler for binary ops: clamp stack, result 0
+binop_underflow:
+    mov r15, data_stack
+    xor r14, r14
+    ret
+
+; Pop second operand with underflow guard (jumps to handler if empty)
+%macro BINOP_POP 0
+    sub r15, 8
+    cmp r15, data_stack
+    jl binop_underflow
+%endmacro
+
 word_plus:
     ; Add: pop second, add to TOS (in R14)
-    sub r15, 8
+    BINOP_POP
     add r14, [r15]
     ret
 
 word_minus:
     ; Subtract: second - TOS, result in TOS
-    sub r15, 8
+    BINOP_POP
     mov rax, [r15]
     sub rax, r14
     mov r14, rax
@@ -3235,33 +3251,51 @@ word_minus:
 
 word_mult:
     ; Multiply: second * TOS
-    sub r15, 8
+    BINOP_POP
     imul r14, [r15]
     ret
 
 word_div:
-    ; Divide: second / TOS
-    sub r15, 8
+    ; Divide: second / TOS (signed; div by zero yields 0)
+    BINOP_POP
     mov rax, [r15]          ; Dividend (second)
     mov rbx, r14            ; Divisor (TOS)
-    xor rdx, rdx
-    div rbx
+    test rbx, rbx
+    jz .div_zero
+    cmp rbx, -1             ; Guard INT_MIN / -1 overflow
+    je .div_neg1
+    cqo
+    idiv rbx
     mov r14, rax            ; Quotient becomes TOS
+    ret
+.div_neg1:
+    neg rax
+    mov r14, rax
+    ret
+.div_zero:
+    xor r14, r14
     ret
 
 word_mod:
-    ; Modulo: second mod TOS
-    sub r15, 8
+    ; Modulo: second mod TOS (signed; mod by zero yields 0)
+    BINOP_POP
     mov rax, [r15]          ; Dividend (second)
     mov rbx, r14            ; Divisor (TOS)
-    xor rdx, rdx
-    div rbx
+    test rbx, rbx
+    jz .mod_zero
+    cmp rbx, -1             ; Guard INT_MIN / -1 overflow
+    je .mod_zero            ; n mod -1 = 0
+    cqo
+    idiv rbx
     mov r14, rdx            ; Remainder becomes TOS
+    ret
+.mod_zero:
+    xor r14, r14
     ret
 
 word_eq:
     ; Equal: second = TOS -> flag ( a b -- flag )
-    sub r15, 8
+    BINOP_POP
     mov rax, [r15]
     cmp rax, r14
     je .eq_true
@@ -3273,7 +3307,7 @@ word_eq:
 
 word_neq:
     ; Not equal: second <> TOS -> flag
-    sub r15, 8
+    BINOP_POP
     mov rax, [r15]
     cmp rax, r14
     jne .neq_true
@@ -3285,7 +3319,7 @@ word_neq:
 
 word_lt:
     ; Less than: second < TOS -> flag
-    sub r15, 8
+    BINOP_POP
     mov rax, [r15]
     cmp rax, r14
     jl .lt_true
@@ -3297,7 +3331,7 @@ word_lt:
 
 word_gt:
     ; Greater than: second > TOS -> flag
-    sub r15, 8
+    BINOP_POP
     mov rax, [r15]
     cmp rax, r14
     jg .gt_true
@@ -3309,7 +3343,7 @@ word_gt:
 
 word_le:
     ; Less or equal: second <= TOS -> flag
-    sub r15, 8
+    BINOP_POP
     mov rax, [r15]
     cmp rax, r14
     jle .le_true
@@ -3321,7 +3355,7 @@ word_le:
 
 word_ge:
     ; Greater or equal: second >= TOS -> flag
-    sub r15, 8
+    BINOP_POP
     mov rax, [r15]
     cmp rax, r14
     jge .ge_true
@@ -3343,19 +3377,19 @@ word_zeq:
 
 word_and:
     ; Bitwise AND ( a b -- a&b )
-    sub r15, 8
+    BINOP_POP
     and r14, [r15]
     ret
 
 word_or:
     ; Bitwise OR ( a b -- a|b )
-    sub r15, 8
+    BINOP_POP
     or r14, [r15]
     ret
 
 word_xor:
     ; Bitwise XOR ( a b -- a^b )
-    sub r15, 8
+    BINOP_POP
     xor r14, [r15]
     ret
 
@@ -3914,9 +3948,11 @@ word_exit:
 
 word_fetch:
     ; Fetch: TOS is address, replace with value at address
-    ; Validate address (check it's not a small immediate)
+    ; Validate address: below 1000 or beyond mapped 4MB is invalid
     cmp r14, 1000
     jl .fetch_invalid       ; Very small values likely wrong
+    cmp r14, 0x400000
+    jae .fetch_invalid      ; Beyond mapped memory: would triple fault
 
     mov rax, [r14]
     mov r14, rax
@@ -3933,9 +3969,11 @@ word_fetch:
 
 word_store:
     ; Store: ( value addr -- ) second=value, TOS=addr
-    ; Validate address (basic check)
+    ; Validate address (below 1000 or beyond mapped 4MB is invalid)
     cmp r14, 1000
     jl .store_invalid
+    cmp r14, 0x400000
+    jae .store_invalid
 
     mov rax, r14            ; Address
     sub r15, 8
@@ -3972,6 +4010,8 @@ word_c_fetch:
     ; c@ ( addr -- byte ) - Fetch byte from address
     cmp r14, 1000
     jl .c_fetch_invalid
+    cmp r14, 0x400000
+    jae .c_fetch_invalid
     movzx rax, byte [r14]   ; Read byte, zero-extend to 64-bit
     mov r14, rax
     ret
@@ -3987,16 +4027,27 @@ word_c_store:
     ; c! ( byte addr -- ) - Store byte at address
     cmp r14, 1000
     jl .c_store_invalid
+    cmp r14, 0x400000
+    jae .c_store_invalid
     mov rax, r14            ; Address
     sub r15, 8
     mov rbx, [r15]          ; Byte value
     mov [rax], bl           ; Store only low byte
     sub r15, 8
+    cmp r15, data_stack
+    jl .c_store_empty
     mov r14, [r15]          ; New TOS
     ret
+.c_store_empty:
+    mov r15, data_stack
+    xor r14, r14
+    ret
 .c_store_invalid:
-    sub r15, 8              ; Drop addr
-    sub r15, 8              ; Drop byte
+    sub r15, 16             ; Drop addr and byte
+    cmp r15, data_stack
+    jge .c_store_inv_ok
+    mov r15, data_stack
+.c_store_inv_ok:
     push rsi
     mov rsi, str_bad_addr
     call create_string_from_cstr
@@ -4202,9 +4253,25 @@ word_at:
     sub r15, 8
     mov rax, [r15]          ; Array from second
 
+    ; Validate: heap object, TYPE_ARRAY, index in bounds
+    cmp rax, 0x200000
+    jb .at_invalid
+    cmp qword [rax], TYPE_ARRAY
+    jne .at_invalid
+    cmp rbx, [rax+8]
+    jae .at_invalid         ; Unsigned: catches negative too
+
     ; Get element: array[index]
     lea rax, [rax + 16 + rbx*8]
     mov r14, [rax]          ; Value becomes TOS
+    ret
+
+.at_invalid:
+    push rsi
+    mov rsi, str_bad_index
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
     ret
 
 word_put:
@@ -4215,14 +4282,45 @@ word_put:
     sub r15, 8
     mov rax, [r15]          ; Value from third
 
+    ; Validate: heap object, TYPE_ARRAY, index in bounds
+    cmp rcx, 0x200000
+    jb .put_invalid
+    cmp qword [rcx], TYPE_ARRAY
+    jne .put_invalid
+    cmp rbx, [rcx+8]
+    jae .put_invalid        ; Unsigned: catches negative too
+
     ; Store: array[index] = value
     lea rcx, [rcx + 16 + rbx*8]
     mov [rcx], rax
 
     ; Load new TOS
     sub r15, 8
+    cmp r15, data_stack
+    jl .put_empty
     mov r14, [r15]
     ret
+
+.put_empty:
+    mov r15, data_stack
+    xor r14, r14
+    ret
+
+.put_invalid:
+    ; Drop value slot too, push error string
+    sub r15, 8
+    cmp r15, data_stack
+    jge .put_inv_ok
+    mov r15, data_stack
+.put_inv_ok:
+    push rsi
+    mov rsi, str_bad_index
+    call create_string_from_cstr
+    pop rsi
+    mov r14, rax
+    ret
+
+str_bad_index: db '(bad array index)', 0
 
 word_free:
     ; Free object from TOS (stub - just drops it)
@@ -4353,9 +4451,9 @@ word_type_name:
     ; Memory layout: [data_stack]=str (depth 2, R15=data_stack+16)
     mov rbx, r14            ; RBX = type_tag
 
-    ; Pop type_tag, get str
-    sub r15, 8              ; Pop type_tag (R15 now = data_stack + 8)
-    mov rax, [r15-8]        ; RAX = str at [data_stack + 0]
+    ; Pop type_tag; str is now at [R15]
+    sub r15, 8
+    mov rax, [r15]          ; RAX = str
 
     ; Validate type_tag >= TYPE_USER_BASE
     cmp rbx, TYPE_USER_BASE
@@ -4370,24 +4468,17 @@ word_type_name:
     lea rcx, [type_registry + rbx*8]
     mov [rcx], rax
 
+.tn_invalid:
     ; Pop str, load new TOS
     sub r15, 8
     cmp r15, data_stack
-    jle .tn_empty
-    mov r14, [r15-8]        ; Load new TOS from memory
+    jl .tn_empty
+    mov r14, [r15]          ; Load new TOS from memory
     ret
 
 .tn_empty:
     mov r15, data_stack
     xor r14, r14
-    ret
-
-.tn_invalid:
-    ; Invalid type tag - just clean stack (pop both)
-    sub r15, 8              ; Already decremented once, decrement again
-    cmp r15, data_stack
-    jle .tn_empty
-    mov r14, [r15-8]
     ret
 
 word_type_set:
@@ -4642,9 +4733,11 @@ word_screen_scroll:
     ; SCREEN-SCROLL - Scroll screen up n lines ( n -- )
     mov rcx, r14            ; RCX = lines to scroll
 
-    ; Validate
+    ; Validate: unsigned so negative n cannot pass; 0 is a no-op
+    test rcx, rcx
+    jz .scroll_done
     cmp rcx, 25
-    jge .scroll_clear       ; If >= 25, just clear
+    jae .scroll_clear       ; If >= 25 (or negative), just clear
 
     ; Calculate bytes to copy: (25 - n) * 80 * 2
     mov rax, 25
@@ -5184,7 +5277,15 @@ word_disk_read:
     mov rdi, r14            ; addr
     sub r15, 8
     mov rax, [r15]          ; sector
-    mov r14, [r15-8]        ; new TOS (or garbage if stack empty)
+    sub r15, 8              ; pop second item too (was leaked before)
+    cmp r15, data_stack
+    jl .dr_uflow
+    mov r14, [r15]          ; new TOS
+    jmp .dr_go
+.dr_uflow:
+    mov r15, data_stack
+    xor r14, r14
+.dr_go:
 
     mov ecx, eax            ; Save sector BEFORE wait loop corrupts AL
 
@@ -5271,7 +5372,15 @@ word_disk_write:
     mov rax, r14            ; sector
     sub r15, 8
     mov rsi, [r15]          ; addr
-    mov r14, [r15-8]        ; new TOS (or garbage if stack empty)
+    sub r15, 8              ; pop second item too (was leaked before)
+    cmp r15, data_stack
+    jl .dw_uflow
+    mov r14, [r15]          ; new TOS
+    jmp .dw_go
+.dw_uflow:
+    mov r15, data_stack
+    xor r14, r14
+.dw_go:
 
     mov ecx, eax            ; Save sector BEFORE wait loop corrupts AL
 
@@ -5768,7 +5877,7 @@ builtin_info_table:
     db 'again', 0, '( -- ) Infinite loop back', 0
     db 'key', 0, '( -- char ) Wait for keypress', 0
     db 'key?', 0, '( -- flag ) Check if key available', 0
-    db 'disk-read', 0, '( sector -- addr ) Read disk sector', 0
+    db 'disk-read', 0, '( sector addr -- ) Read disk sector to addr', 0
     db 'disk-write', 0, '( addr sector -- ) Write to disk', 0
     db 'ed', 0, '( -- ) Mini text editor', 0
     db 'save', 0, '( -- ) Save definitions to disk', 0
@@ -6578,8 +6687,9 @@ word_edit:
     mov rsi, str_editor_name
     call create_string_from_cstr
     pop rsi
-    mov r14, rax            ; Put string on stack
+    mov [r15], r14          ; Spill old TOS before overwriting
     add r15, 8
+    mov r14, rax            ; Push string
     jmp word_load           ; Tail call to load
 
 str_editor_name: db 'editor', 0
@@ -7916,6 +8026,7 @@ dictionary_space: times 8192 db 0
 ; Definition source storage (for SAVE/LOAD persistence)
 def_src_buffer: times 4096 db 0     ; Stores source text of definitions
 def_src_ptr: dq def_src_buffer      ; Next free position
-DEF_SAVE_SECTOR equ 250             ; Disk sector for saved definitions
+DEF_SAVE_SECTOR equ 400             ; Disk sector for saved definitions
+                                    ; (apps own 200-399, editor owns 450+)
 
 msg64: db 'Simplicity v0.1 - 64-bit RPN "Lego" OS (v1.0 = Doom!)', 0
