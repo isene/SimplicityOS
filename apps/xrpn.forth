@@ -77,3 +77,41 @@
 
 ( --- init --- )
 "xrpn-init" [ clst clrg 0 {hpflg} ! 0.0 {lr} ! ] define
+
+( --- run an editor file as source: write programs on the OS --- )
+2056 allot {fbuf} !
+
+"nl2sp" [ begin dup c@ 0 = not while dup c@ 10 = over c@ 13 = or if 32 over c! then 1 + repeat drop ] define
+
+"runfile" [
+  init-dir-buffer
+  {filename} !
+  find-file {fsec} !
+  {fsec} @ 0 = if "(file not found)" . cr else
+    {fsec} @ {fbuf} @ disk-read
+    {fsec} @ 1 + {fbuf} @ 512 + disk-read
+    {fsec} @ 2 + {fbuf} @ 1024 + disk-read
+    {fsec} @ 3 + {fbuf} @ 1536 + disk-read
+    0 {fbuf} @ 2048 + c!
+    {fbuf} @ nl2sp
+    {fbuf} @ eval
+  then
+] define
+( mkdemo: write a program file from code, rftest: run it )
+"mkdemo" [
+  init-dir-buffer
+  "prog" {filename} !
+  find-file 0 = if create-file drop then
+  "9.0 xn hpsqrt prx" {ps} !
+  {ps} @ len {pn} !
+  0 {i3} ! begin {i3} @ {pn} @ < while
+    {ps} @ 16 + {i3} @ + c@ {fbuf} @ {i3} @ + c!
+    {i3} @ 1 + {i3} ! repeat
+  0 {fbuf} @ {pn} @ + c!
+  {fbuf} @ {file-sector} @ disk-write
+  {fbuf} @ 512 + {file-sector} @ 1 + disk-write
+  {fbuf} @ 1024 + {file-sector} @ 2 + disk-write
+  {fbuf} @ 1536 + {file-sector} @ 3 + disk-write
+] define
+
+"rftest" [ "prog" runfile ] define

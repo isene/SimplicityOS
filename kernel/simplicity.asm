@@ -3933,6 +3933,20 @@ match_float_word:
     mov rax, word_sf
     ret
 .mf_not_sf:
+    ; eval (4 chars)
+    cmp rcx, 4
+    jne .mf_not_eval
+    cmp byte [rdi], 'e'
+    jne .mf_not_eval
+    cmp byte [rdi+1], 'v'
+    jne .mf_not_eval
+    cmp byte [rdi+2], 'a'
+    jne .mf_not_eval
+    cmp byte [rdi+3], 'l'
+    jne .mf_not_eval
+    mov rax, word_eval
+    ret
+.mf_not_eval:
     cmp byte [rdi], 'f'
     jne .mf_no
     cmp rcx, 2
@@ -4884,6 +4898,61 @@ word_inspect:
 
 str_colon_ref: db '(colon)', 0
 str_builtin_ref: db '(built-in)', 0
+
+word_eval:
+    ; eval ( str-or-addr -- ) interpret text as source code.
+    ; Accepts a heap STRING object or a raw buffer address of
+    ; null-terminated text (e.g. an allot'ed file buffer).
+    mov rax, r14
+
+    ; Pop with underflow clamp
+    sub r15, 8
+    cmp r15, data_stack
+    jl .ev_empty
+    mov r14, [r15]
+    jmp .ev_go
+.ev_empty:
+    mov r15, data_stack
+    xor r14, r14
+.ev_go:
+
+    ; Address sanity
+    cmp rax, 1000
+    jl .ev_bad
+    cmp rax, 0x400000
+    jae .ev_bad
+
+    ; STRING object: text at +16. Anything else (allot'ed buffers
+    ; included, which are heap addresses too): raw text at the address.
+    cmp rax, HEAP_START
+    jb .ev_raw
+    cmp rax, [heap_ptr]
+    jae .ev_raw
+    cmp qword [rax], TYPE_STRING
+    jne .ev_raw
+    lea rsi, [rax+16]
+    jmp .ev_run
+
+.ev_raw:
+    mov rsi, rax
+
+.ev_run:
+    push r13
+    call interpret_line
+    pop r13
+    ret
+
+.ev_bad:
+    push rsi
+    mov rsi, str_eval_bad
+    call create_string_from_cstr
+    pop rsi
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    ret
+
+str_eval_bad: db '(eval needs string or buffer)', 0
 
 word_execute:
     ; Execute code reference from TOS ( ref -- )
@@ -6427,6 +6496,7 @@ builtin_info_table:
     db 'remove', 0, '( "name" -- ) Remove user word', 0
     db 'define', 0, '( "name" { body } -- ) Define new word', 0
     db 'sort', 0, '( array -- array ) Sort array in place', 0
+    db 'eval', 0, '( str -- ) Interpret string as source code', 0
     db 's>f', 0, '( n -- f ) Integer to float', 0
     db 'f>s', 0, '( f -- n ) Float to integer, truncated', 0
     db 'f+', 0, '( a b -- a+b ) Float add', 0
@@ -7433,7 +7503,7 @@ word_words:
     pop rbx
     ret
 
-str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write save restore info remove define sort allot load edit s>f f>s f+ f- f* f/ f< f> f= f. fix fpi fneg fabs fsqrt fsin fcos ftan fatan fln flog fexp fpow', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write save restore info remove define sort allot load edit eval s>f f>s f+ f- f* f/ f< f> f= f. fix fpi fneg fabs fsqrt fsin fcos ftan fatan fln flog fexp fpow', 0
 words_buffer: times 8192 db 0   ; Buffer for word list
 word_ptrs: times 512 dq 0       ; Pointers to words (max 512 words)
 word_lens: times 512 db 0       ; Lengths of words

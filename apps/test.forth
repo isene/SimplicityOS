@@ -89,3 +89,4 @@
 "ft6" [ 2.0 10.0 fpow ] define
 "ft7" [ 7 s>f 2.0 f/ ] define
 "ft8" [ 3.75 f>s ] define
+"evtest" [ "3 4 + ." eval ] define

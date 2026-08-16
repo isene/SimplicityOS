@@ -177,7 +177,11 @@ ok
 
 Floats, the four-register X/Y/Z/T stack, 100 registers, flags and
 FOCAL-style programs. Write programs as `.xrpn` files in `apps/`;
-`tools/xrpn2forth` translates them to words at build time. See
+`tools/xrpn2forth` translates them to words at build time.
+
+Programs can also be written on the OS itself: create a file in the
+editor using hp-words, save with `:w name`, run with `"name" runfile`.
+The kernel word `eval` interprets any string as source. See
 `apps/demo.xrpn` and docs/ROADMAP.md for what is covered.
 
 ### Space Invaders

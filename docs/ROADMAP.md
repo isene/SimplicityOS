@@ -130,5 +130,10 @@ Still true by design or unimplemented:
 - Not ported: alpha register ops, indirect addressing, isg,
   statistics, EEX entry, label fall-through, mid-block rtn.
   gto translates as a call and returns; use xeq style flow.
-- Stage 3 (open): on-OS FOCAL interpreter for interactive
-  program entry, HP-41 RAW import via the translator.
+- Stage 3 (done, v0.8.0): programs are written and run entirely
+  on the OS. Kernel word eval interprets strings or buffers as
+  source; runfile loads an editor file and evals it. Write hp-word
+  programs in the editor (:w name), then "name" runfile. mkdemo in
+  apps/xrpn.forth shows programmatic file creation.
+- Open: on-OS FOCAL-syntax entry (hp-words are the FOCAL commands,
+  so this is cosmetic), HP-41 RAW import via the translator.

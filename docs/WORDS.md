@@ -380,6 +380,17 @@ ok
 A ok
 ```
 
+### eval
+**Category:** Kernel
+**Stack:** `( str -- )`
+**Description:** Interpret text as source code. Accepts a STRING or an
+allot'ed buffer of null-terminated text. Together with the editor and
+`runfile` this allows writing and running programs entirely on the OS.
+```forth
+> "3 4 + ." eval
+7 ok
+```
+
 ### execute
 **Category:** Kernel
 **Stack:** `( ref -- )`

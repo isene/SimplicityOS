@@ -1,5 +1,24 @@
 # Simplicity OS - Changelog
 
+## [0.8.0] - 2026-08-16 - Self-Hosted Programs: eval and runfile
+
+Stage 3 of the XRPN port: write and run programs on the OS itself.
+
+- New kernel word eval ( str -- ): interpret text as source code.
+  Accepts a STRING object or an allot'ed buffer of null-terminated
+  text. Reentrant with the REPL interpreter
+- runfile ( name -- ) in apps/xrpn.forth: finds an editor file,
+  reads its 4 sectors, converts newlines to spaces, evals it.
+  Write hp-word programs in the editor, save with :w name, run
+  with "name" runfile
+- mkdemo shows programmatic file creation: builds a program file
+  from a string and saves it through the editor's directory
+- Verified in QEMU: mkdemo + rftest round-trips a program through
+  the disk and prints sqrt(9) via the HP stack; "3 4 + ." eval
+  prints 7
+- Caveat: use ( ) comments in runnable files; a backslash comment
+  swallows the rest of the file (it becomes one line)
+
 ## [0.7.0] - 2026-08-16 - XRPN: HP-41 Layer
 
 Stage 2 of the XRPN port: FOCAL programs run on Simplicity OS.
