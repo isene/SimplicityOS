@@ -1,0 +1,9 @@
+#!/bin/sh
+# Launch Simplicity OS in QEMU. Builds first if needed.
+# Usage: run-simplicity       (BIOS boot)
+#        run-simplicity -u    (UEFI boot via OVMF)
+cd "$(dirname "$(readlink -f "$0")")/.." || exit 1
+if [ "$1" = "-u" ]; then
+    exec make run-uefi
+fi
+exec make run
