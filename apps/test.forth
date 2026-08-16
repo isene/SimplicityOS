@@ -75,3 +75,6 @@
   repeat
 ] define
 "negtest" [ -7 ] define
+"cfnest" [ 0 {cf} ! 3 begin dup 0 > while dup {cf} @ + {cf} ! 1 - repeat drop {cf} @ ] define
+"cfif" [ dup 0 > if dup 10 > if drop 99 then then ] define
+"cfbad" [ then ] define

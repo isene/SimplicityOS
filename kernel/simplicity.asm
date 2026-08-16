@@ -15,6 +15,7 @@
 ;   0x090000             Return stack (grows down)
 ;   0x100000 - 0x160000  App load buffer
 ;   0x200000 - 0x240000  Dictionary (user definitions)
+;   0x240000 - 0x248000  Compile buffer
 ;   0x260000 - 0x400000  Heap (bump allocator, capped)
 ; ============================================================
 DICT_SPACE      equ 0x200000
@@ -1159,10 +1160,15 @@ history_prev:
     test rax, rax
     jz .prev_done
 
-    ; Check if we can go back
+    ; Floor: only the last 10 entries exist (ring buffer)
+    mov rbx, [history_count]
+    sub rbx, 10
+    jns .prev_have_floor
+    xor rbx, rbx
+.prev_have_floor:
     mov rax, [history_index]
-    test rax, rax
-    jz .prev_done                   ; Already at oldest
+    cmp rax, rbx
+    jbe .prev_done                  ; At oldest retained entry
 
     ; Move to previous entry
     dec qword [history_index]
@@ -3868,13 +3874,8 @@ word_clstk:
 
 word_varcount:
     ; Push named variable count ( -- n )
-    cmp r15, data_stack
-    je .vc_first
     mov [r15], r14
     add r15, 8
-    mov r14, [named_var_count]
-    ret
-.vc_first:
     mov r14, [named_var_count]
     ret
 
@@ -4181,10 +4182,10 @@ str_colon_ref: db '(colon)', 0
 str_builtin_ref: db '(built-in)', 0
 
 word_execute:
-    ; Execute code reference from TOS
+    ; Execute code reference from TOS ( ref -- )
     mov rax, r14            ; Get reference from TOS
 
-    ; Load new TOS (with underflow check)
+    ; Pop with underflow check
     sub r15, 8
     cmp r15, data_stack
     jl .exec_underflow
@@ -4192,94 +4193,41 @@ word_execute:
     jmp .exec_validate
 
 .exec_underflow:
-    ; Stack underflow - reset to empty
     mov r15, data_stack
     xor r14, r14
 
 .exec_validate:
-    ; Validate reference (check for null/invalid)
-    test rax, rax
-    jz .invalid_ref
-
-    ; Check if dictionary word
-    push rbx
+    ; Dictionary word?
     cmp rax, DICT_SPACE
-    jl .exec_builtin
-
+    jb .exec_try_builtin
+    cmp rax, [dict_here]
+    jae .invalid_ref        ; Beyond dictionary (heap objects land here)
+    push rbx
     mov rbx, [rax]
     cmp rbx, DOCOL
     pop rbx
-    jne .exec_builtin
+    jne .invalid_ref
 
-    ; Dictionary word - execute definition body
-    mov [rbp], rsi
-    sub rbp, 8
-    add rax, 8              ; Skip to body
+    ; Colon definition: run through the canonical interpreter so
+    ; nested user words, literals and branches all behave identically
+    push rsi
+    add rax, 8              ; Skip code field
     mov rsi, rax
-
-.exec_loop:
-    lodsq
-    cmp rax, EXIT
-    je .exec_end
-
-    cmp rax, LIT
-    jne .check_branch
-    ; LIT - push next value
-    lodsq
-    cmp r15, data_stack
-    je .lit_first
-    mov [r15], r14
-    add r15, 8
-    mov r14, rax
-    jmp .exec_loop
-.lit_first:
-    mov r14, rax
-    jmp .exec_loop
-
-.check_branch:
-    cmp rax, BRANCH
-    jne .check_zbranch
-    ; BRANCH - unconditional jump
-    lodsq                   ; Get offset
-    add rsi, rax
-    jmp .exec_loop
-
-.check_zbranch:
-    cmp rax, ZBRANCH
-    jne .exec_call
-    ; ZBRANCH - branch if TOS is zero
-    lodsq                   ; Get offset
-    mov rbx, r14            ; Get TOS
-    ; Pop TOS using R14/R15 convention
-    sub r15, 8
-    cmp r15, data_stack
-    jl .zbranch_empty       ; Use jl not jle - R15==data_stack means valid element at [R15]
-    mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
-    jmp .zbranch_check
-.zbranch_empty:
-    mov r15, data_stack
-    xor r14, r14
-.zbranch_check:
-    test rbx, rbx
-    jnz .exec_loop          ; Non-zero, don't branch
-    add rsi, rax            ; Zero, take branch
-    jmp .exec_loop
-
-.exec_call:
-    call rax
-    jmp .exec_loop
-
-.exec_end:
-    add rbp, 8
-    mov rsi, [rbp]
+    call exec_definition
+    pop rsi
     ret
 
-.exec_builtin:
+.exec_try_builtin:
+    ; Builtin: must point inside the kernel image
+    cmp rax, 0x10000
+    jb .invalid_ref
+    cmp rax, kernel_image_end
+    jae .invalid_ref
     call rax
     ret
 
 .invalid_ref:
-    ; Push error STRING for invalid reference (TOS model)
+    ; Push error STRING for invalid reference
     push rsi
     mov rsi, str_invalid_ref
     call create_string_from_cstr
@@ -4516,15 +4464,9 @@ word_type_new:
     mov rax, [next_type_tag]
 
     ; Push to TOS
-    cmp r15, data_stack
-    je .tn_first
     mov [r15], r14
     add r15, 8
     mov r14, rax
-    jmp .tn_done
-.tn_first:
-    mov r14, rax
-.tn_done:
     ; Increment for next allocation
     inc qword [next_type_tag]
 
@@ -4951,15 +4893,9 @@ word_key:
     call wait_key
 
     ; Push to TOS
-    cmp r15, data_stack
-    je .wk_first
     mov [r15], r14
     add r15, 8
     mov r14, rax
-    ret
-.wk_first:
-    mov r14, rax
-    ; Don't advance r15 - first value goes in R14 only
     ret
 
 word_key_check:
@@ -4967,98 +4903,57 @@ word_key_check:
     call check_key
 
     ; Push to TOS
-    cmp r15, data_stack
-    je .kc_first
     mov [r15], r14
     add r15, 8
     mov r14, rax
-    ret
-.kc_first:
-    mov r14, rax
-    ; Don't advance r15 - first value goes in R14 only
     ret
 
 word_key_escape:
     ; KEY-ESCAPE - Push escape key constant ( -- 256 )
-    cmp r15, data_stack
-    je .ke_first
     mov [r15], r14
     add r15, 8
-    mov r14, KEY_ESCAPE
-    ret
-.ke_first:
     mov r14, KEY_ESCAPE
     ret
 
 word_key_up:
     ; KEY-UP - Push up arrow constant ( -- 257 )
-    cmp r15, data_stack
-    je .ku_first
     mov [r15], r14
     add r15, 8
-    mov r14, KEY_UP
-    ret
-.ku_first:
     mov r14, KEY_UP
     ret
 
 word_key_down:
     ; KEY-DOWN - Push down arrow constant ( -- 258 )
-    cmp r15, data_stack
-    je .kd_first
     mov [r15], r14
     add r15, 8
-    mov r14, KEY_DOWN
-    ret
-.kd_first:
     mov r14, KEY_DOWN
     ret
 
 word_key_left:
     ; KEY-LEFT - Push left arrow constant ( -- 259 )
-    cmp r15, data_stack
-    je .kl_first
     mov [r15], r14
     add r15, 8
-    mov r14, KEY_LEFT
-    ret
-.kl_first:
     mov r14, KEY_LEFT
     ret
 
 word_key_right:
     ; KEY-RIGHT - Push right arrow constant ( -- 260 )
-    cmp r15, data_stack
-    je .kr_first
     mov [r15], r14
     add r15, 8
-    mov r14, KEY_RIGHT
-    ret
-.kr_first:
     mov r14, KEY_RIGHT
     ret
 
 word_key_delete:
     ; KEY-DELETE - Push delete key constant ( -- 265 )
-    cmp r15, data_stack
-    je .kdel_first
     mov [r15], r14
     add r15, 8
-    mov r14, KEY_DELETE
-    ret
-.kdel_first:
     mov r14, KEY_DELETE
     ret
 
 word_key_backspace:
     ; KEY-BACKSPACE - Push backspace constant ( -- 8 )
-    cmp r15, data_stack
-    je .kbs_first
     mov [r15], r14
     add r15, 8
-    mov r14, 8
-    ret
-.kbs_first:
     mov r14, 8
     ret
 
@@ -5072,6 +4967,7 @@ word_if:
     cmp byte [compile_mode], 0
     je .if_error
 
+    inc byte [ctl_items]        ; Track control-stack balance
     mov rbx, [compile_ptr]
     mov qword [rbx], ZBRANCH    ; Compile ZBRANCH
     add rbx, 8
@@ -5089,6 +4985,9 @@ word_then:
     ; THEN - resolve forward branch from IF or ELSE
     cmp byte [compile_mode], 0
     je .then_error
+    cmp byte [ctl_items], 1
+    jb .then_error              ; Unbalanced: nothing to resolve
+    dec byte [ctl_items]
 
     ; Pop address from control stack
     add rbp, 8
@@ -5105,6 +5004,8 @@ word_else:
     ; ELSE - compile BRANCH, resolve IF's placeholder, push new placeholder
     cmp byte [compile_mode], 0
     je .else_error
+    cmp byte [ctl_items], 1
+    jb .else_error              ; Unbalanced: no IF open
 
     mov rcx, [compile_ptr]
     mov qword [rcx], BRANCH     ; Compile unconditional branch
@@ -5134,6 +5035,7 @@ word_begin:
     ; BEGIN - mark loop start, push address
     cmp byte [compile_mode], 0
     je .begin_error
+    inc byte [ctl_items]        ; Track control-stack balance
 
     ; Push current compile address to control stack
     mov rax, [compile_ptr]
@@ -5147,6 +5049,9 @@ word_until:
     ; UNTIL - compile ZBRANCH back to BEGIN
     cmp byte [compile_mode], 0
     je .until_error
+    cmp byte [ctl_items], 1
+    jb .until_error             ; Unbalanced: no BEGIN open
+    dec byte [ctl_items]
 
     ; Pop loop start address
     add rbp, 8
@@ -5171,6 +5076,9 @@ word_while:
     ; WHILE - like IF but inside a loop, push placeholder
     cmp byte [compile_mode], 0
     je .while_error
+    cmp byte [ctl_items], 1
+    jb .while_error             ; Unbalanced: no BEGIN open
+    inc byte [ctl_items]
 
     mov rbx, [compile_ptr]
     mov qword [rbx], ZBRANCH
@@ -5188,6 +5096,9 @@ word_repeat:
     ; REPEAT - compile BRANCH back to BEGIN, resolve WHILE
     cmp byte [compile_mode], 0
     je .repeat_error
+    cmp byte [ctl_items], 2
+    jb .repeat_error            ; Unbalanced: needs BEGIN and WHILE
+    sub byte [ctl_items], 2
 
     ; Pop WHILE placeholder
     add rbp, 8
@@ -5222,6 +5133,9 @@ word_again:
     ; AGAIN - compile unconditional BRANCH back to BEGIN
     cmp byte [compile_mode], 0
     je .again_error
+    cmp byte [ctl_items], 1
+    jb .again_error             ; Unbalanced: no BEGIN open
+    dec byte [ctl_items]
 
     ; Pop loop start address
     add rbp, 8
@@ -5272,6 +5186,12 @@ word_app_exit:
     mov r14, [app_saved_tos]
     mov r15, [app_saved_sp]
     mov qword [app_active], 0
+
+    ; Reset interpreter modes: an app that ended mid-compile must not
+    ; leave the REPL silently compiling every later line
+    mov byte [compile_mode], 0
+    mov byte [array_mode], 0
+    mov byte [ctl_items], 0
     ret
 
 .not_in_app:
@@ -5295,13 +5215,8 @@ word_app_stack:
     mov rax, app_stack
 .use_main:
     ; Push to TOS
-    cmp r15, data_stack
-    je .as_first
     mov [r15], r14
     add r15, 8
-    mov r14, rax
-    ret
-.as_first:
     mov r14, rax
     ret
 
@@ -5319,15 +5234,8 @@ word_app_depth:
     shr rbx, 3                  ; Divide by 8
 
     ; Push to TOS
-    cmp r15, data_stack
-    je .ad_first
-    cmp r15, app_stack
-    je .ad_first
     mov [r15], r14
     add r15, 8
-    mov r14, rbx
-    ret
-.ad_first:
     mov r14, rbx
     ret
 
@@ -6692,6 +6600,8 @@ word_words:
 .got_word_start:
     cmp byte [rsi], 0
     je .builtins_parsed
+    cmp r8, 512
+    jae .builtins_parsed        ; Table full
 
     ; Store pointer (word_ptrs uses qwords, index*8)
     mov rax, r8
@@ -6720,6 +6630,8 @@ word_words:
 .add_user_words:
     test rsi, rsi
     jz .all_words_collected
+    cmp r8, 512
+    jae .all_words_collected    ; Table full
 
     ; Store pointer to name (at offset 9)
     mov rax, r8
@@ -6746,6 +6658,8 @@ word_words:
 .build_output:
     cmp r10, [word_count]
     jge .output_done
+    cmp rdi, words_buffer + 8192 - 40
+    jae .output_done            ; Buffer nearly full
 
     ; Add space between words (not before first)
     test r10, r10
@@ -6793,9 +6707,9 @@ word_words:
     ret
 
 str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write save restore info remove define sort allot load edit', 0
-words_buffer: times 2048 db 0   ; Buffer for word list
-word_ptrs: times 256 dq 0       ; Pointers to words (max 256 words)
-word_lens: times 256 db 0       ; Lengths of words
+words_buffer: times 8192 db 0   ; Buffer for word list
+word_ptrs: times 512 dq 0       ; Pointers to words (max 512 words)
+word_lens: times 512 db 0       ; Lengths of words
 word_count: dq 0                ; Number of words
 last_word_ptr: dq 0             ; Pointer to last parsed word (for error messages)
 last_word_len: dq 0             ; Length of last parsed word
@@ -6840,10 +6754,14 @@ word_define:
     ; - Other code references: store directly
     mov qword [compile_ptr], compile_buffer
     mov byte [compile_mode], 1  ; Enable compile mode for control flow words
+    mov byte [ctl_items], 0     ; Fresh control-flow balance
 
 .define_copy_loop:
     test rcx, rcx
     jz .define_copy_done
+    mov rdi, [compile_ptr]
+    cmp rdi, compile_buffer + 4096*8 - 64
+    jae .define_copy_done       ; Compile buffer full: truncate
     lodsq                       ; Get element into RAX
     push rcx
     push rsi
@@ -6923,22 +6841,30 @@ word_define:
     cmp qword [rax], TYPE_STRING
     jne .define_error
 
-    ; Copy name to new_word_name
+    ; Copy name to new_word_name (max 31 chars + null)
     lea rsi, [rax+16]           ; String data
     mov rdi, new_word_name
-    mov rcx, 32
+    mov rcx, 31
 .copy_name:
     lodsb
-    stosb
     test al, al
     jz .name_copied
+    stosb
     dec rcx
     jnz .copy_name
 .name_copied:
+    mov byte [rdi], 0
 
     ; Pop both array and name from stack
     sub r15, 16                 ; Remove two items
+    cmp r15, data_stack
+    jl .define_pop_empty
     mov r14, [r15]              ; New TOS
+    jmp .define_popped
+.define_pop_empty:
+    mov r15, data_stack
+    xor r14, r14
+.define_popped:
 
     ; Ensure modes are reset
     mov byte [compile_mode], 0
@@ -7018,6 +6944,7 @@ str_builtin_type: db '(built-in)', 0
 word_colon:
     ; Set mode to get name next
     mov byte [compile_mode], 2
+    mov byte [ctl_items], 0     ; Fresh control-flow balance
 
     ; Reset compilation buffer
     mov rax, compile_buffer
@@ -7050,7 +6977,7 @@ save_def_source:
 
     ; Check if we have space (leave room for null + newline)
     mov rax, def_src_buffer
-    add rax, 4090               ; Max buffer - 6 bytes margin
+    add rax, 4008               ; Max buffer minus one full line (82 bytes)
     cmp rdi, rax
     jge .src_full               ; Buffer full, skip
 
@@ -7270,6 +7197,9 @@ interpret_line:
 
 .iline_compile_word:
     ; Compiling - store word address
+    mov rbx, [compile_ptr]
+    cmp rbx, compile_buffer + 4096*8 - 64
+    jae .iline_parse_loop       ; Compile buffer full: drop
     ; Check if dictionary word
     push rax
     mov rbx, [rax]
@@ -7327,6 +7257,11 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_compile_number:
+    push rbx
+    mov rbx, [compile_ptr]
+    cmp rbx, compile_buffer + 4096*8 - 64
+    pop rbx
+    jae .iline_parse_loop       ; Compile buffer full: drop
     ; Compile LIT + number
     mov rbx, [compile_ptr]
     mov qword [rbx], LIT
@@ -7336,9 +7271,13 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_save_name:
-    ; Save word name for definition
+    ; Save word name for definition (cap at 31 chars + null)
     push rdi
     push rcx
+    cmp rcx, 31
+    jbe .isn_len_ok
+    mov rcx, 31
+.isn_len_ok:
     mov rsi, rdi
     mov rdi, new_word_name
     rep movsb
@@ -7430,6 +7369,11 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_compile_var:
+    push rbx
+    mov rbx, [compile_ptr]
+    cmp rbx, compile_buffer + 4096*8 - 64
+    pop rbx
+    jae .iline_parse_loop       ; Compile buffer full: drop
     ; Compile LIT + address
     mov rbx, [compile_ptr]
     mov qword [rbx], LIT
@@ -7525,6 +7469,11 @@ interpret_line:
     jmp .iline_parse_loop
 
 .iline_compile_string:
+    push rbx
+    mov rbx, [compile_ptr]
+    cmp rbx, compile_buffer + 4096*8 - 64
+    pop rbx
+    jae .iline_parse_loop       ; Compile buffer full: drop
     ; Compile LIT + string address
     mov rbx, [compile_ptr]
     mov qword [rbx], LIT
@@ -7965,11 +7914,13 @@ app_active: dq 0                ; 1 if inside app context, 0 otherwise
 app_loading: dq 1               ; 1 during boot app loading, 0 after (starts at 1)
 array_mode: db 0                ; 1 if inside array literal, 0 otherwise
 compile_mode: db 0              ; 0 = interpret, 1 = compile
+ctl_items: db 0                 ; Open control-flow constructs while compiling
 array_collect_buffer: times 512 dq 0  ; Temporary buffer for array collection (512 elements max)
 array_collect_ptr: dq 0         ; Pointer into collection buffer
 dict_here: dq DICT_SPACE  ; Next free space in dictionary
 dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)
-compile_buffer: times 512 dq 0  ; Compilation buffer (512 cells)
+compile_buffer equ 0x240000     ; Compilation buffer (4096 cells, 32KB)
+                                ; lives between dictionary and heap
 compile_ptr: dq compile_buffer  ; Current compilation position
 new_word_name: times 32 db 0    ; Name of word being defined
 string_pool: times 2048 db 0    ; Temporary string pool
@@ -8009,3 +7960,5 @@ DEF_SAVE_SECTOR equ 400             ; Disk sector for saved definitions
 
 msg64: db 'Simplicity v0.1 - 64-bit RPN "Lego" OS (v1.0 = Doom!)', 0
 str_oom: db '(out of memory)', 0
+
+kernel_image_end:
