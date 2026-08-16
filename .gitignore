@@ -23,3 +23,4 @@ build/
 
 # Generated from .xrpn sources
 apps/demo.forth
+apps/hp41.forth

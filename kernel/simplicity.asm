@@ -9028,6 +9028,8 @@ load_apps:
     call load_app_by_cstring
     mov rsi, app_name_demo
     call load_app_by_cstring
+    mov rsi, app_name_hp41
+    call load_app_by_cstring
 
     ; Done
     mov rsi, serial_apps_done
@@ -9046,6 +9048,7 @@ app_name_hello: db 'hello', 0
 app_name_test: db 'test', 0
 app_name_xrpn: db 'xrpn', 0
 app_name_demo: db 'demo', 0
+app_name_hp41: db 'hp41', 0
 
 ; load_app_by_cstring - Load app by C string name (for boot time)
 ; Input: RSI = pointer to null-terminated app name

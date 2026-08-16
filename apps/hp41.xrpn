@@ -1,0 +1,173 @@
+# Three real HP-41 programs from isene's repos, restructured for
+# the xrpn2forth translator (xeq-style flow instead of raw GTO).
+#
+# lw:     Lambert W by Halley iteration      (hp-41_wlambert)
+# luhn:   Luhn checksum of digits in Alpha   (hp-41_luhn)
+# clumin: color luminosity of hex in Alpha   (hp-41_colorluminosity)
+#
+# Test wrappers: tlw (W(1)=0.5671), tluhn (VALID), tclum (50.19%)
+
+lbl "lw"
+sto 90
+0
+sto 91
+xeq "lwloop"
+rcl 91
+rtn
+
+lbl "lwloop"
+rcl 91
+enter
+enter
+exp
+*
+lastx
+1
+r^
++
+*
+lastx
+1/x
+1
++
+2
+/
+r^
+rcl 90
+-
+enter
+rdn
+*
+-
+/
+st- 91
+abs
+rnd
+x#0?
+gto "lwloop"
+rtn
+
+lbl "luhn"
+0
+sto 00
+cf 01
+sf 02
+aleng
+sto 03
+drop
+xeq "lloop"
+cf 01
+cf 02
+rcl 00
+10
+/
+frc
+10
+*
+"INVALID"
+x=0?
+"VALID"
+aview
+rtn
+
+lbl "lloop"
+xeq "ldigit"
+dse 03
+gto "lloop"
+rtn
+
+lbl "ldigit"
+atox
+48
+-
+enter
+fs? 02
++
+fs?c 02
+sf 05
+fs?c 01
+sf 02
+fs?c 05
+sf 01
+9
+xy
+x>y?
+xeq "ldbl"
+st+ 00
+rtn
+
+lbl "ldbl"
+10
+/
+enter
+int
+xy
+frc
+10
+*
++
+rtn
+
+lbl "clumin"
+3
+sto 01
+0
+sto 00
+xeq "clloop"
+rcl 00
+765
+/
+100
+*
+"LUM="
+arcl x
+"|-%"
+aview
+rtn
+
+lbl "clloop"
+xeq "clbyte"
+dse 01
+gto "clloop"
+rtn
+
+lbl "clbyte"
+xeq "hexd"
+16
+*
+st+ 00
+xeq "hexd"
+st+ 00
+rtn
+
+lbl "hexd"
+atox
+48
+-
+enter
+9
+xy
+x>y?
+xeq "hxa"
+rtn
+
+lbl "hxa"
+7
+-
+rtn
+
+lbl "tlw"
+1
+xeq "lw"
+prx
+rtn
+
+lbl "tluhn"
+"4539148803436467"
+xeq "luhn"
+rtn
+
+lbl "tclum"
+"808080"
+xeq "clumin"
+rtn

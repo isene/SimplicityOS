@@ -49,6 +49,9 @@
 "hpfact" [ {xr} @ {lr} ! {xr} @ f>s {fi} ! 1.0 {fa} ! begin {fi} @ 1 > while {fa} @ {fi} @ s>f f* {fa} ! {fi} @ 1 - {fi} ! repeat {fa} @ {xr} ! ] define
 "hpmod" [ {xr} @ {lr} ! {yr} @ {xr} @ f/ f>s s>f {xr} @ f* {yr} @ swap f- {zr} @ {yr} ! {tr} @ {zr} ! {xr} ! ] define
 "hpperc" [ {xr} @ {lr} ! {yr} @ {xr} @ f* 100.0 f/ {xr} ! ] define
+"hpint" [ {xr} @ {lr} ! {xr} @ f>s s>f {xr} ! ] define
+"hpfrc" [ {xr} @ {lr} ! {xr} @ dup f>s s>f f- {xr} ! ] define
+"hprnd" [ {xr} @ {lr} ! {xr} @ 10000.0 f* dup 0.0 f< if 0.5 f- else 0.5 f+ then f>s s>f 10000.0 f/ {xr} ! ] define
 "hpdrop" [ {yr} @ {xr} ! {zr} @ {yr} ! {tr} @ {zr} ! ] define
 "hpdropy" [ {zr} @ {yr} ! {tr} @ {zr} ! ] define
 "hpln" [ {xr} @ {lr} ! {xr} @ fln {xr} ! ] define
@@ -71,6 +74,7 @@
 "hpsf" [ xf2 {hpflg} @ or {hpflg} ! ] define
 "hpfs?" [ xf2 {hpflg} @ and ] define
 "hpcf" [ dup hpfs? if xf2 {hpflg} @ xor {hpflg} ! else drop then ] define
+"hpfs?c" [ dup hpfs? swap hpcf ] define
 
 ( --- predicates returning flags for skip-next translation --- )
 "hpx=0?" [ {xr} @ 0.0 f= ] define
@@ -139,6 +143,29 @@
 
 "asto" [ regaddr {hpa} @ swap ! ] define
 "arcl" [ regaddr @ dup type 1 = if acat-str else drop then ] define
+
+( --- arcl x: append X as text, FIX-4 style --- )
+"acat-int" [ {av} !
+  0 {hn} ! begin {av} @ 9 > while
+    {av} @ 10 mod {hbuf} @ {hn} @ + c!
+    {av} @ 10 / {av} !
+    {hn} @ 1 + {hn} ! repeat
+  {av} @ {hbuf} @ {hn} @ + c!
+  begin {hn} @ 0 < not while
+    {hbuf} @ {hn} @ + c@ 48 + acat-ch
+    {hn} @ 1 - {hn} ! repeat ] define
+
+"arclx" [
+  {xr} @ 0.0 f< if 45 acat-ch then
+  {xr} @ fabs dup f>s {ai} !
+  {ai} @ s>f f- 10000.0 f* 0.5 f+ f>s {af} !
+  {af} @ 9999 > if {ai} @ 1 + {ai} ! 0 {af} ! then
+  {ai} @ acat-int
+  46 acat-ch
+  {af} @ 1000 / 10 mod 48 + acat-ch
+  {af} @ 100 / 10 mod 48 + acat-ch
+  {af} @ 10 / 10 mod 48 + acat-ch
+  {af} @ 10 mod 48 + acat-ch ] define
 
 ( --- base conversion: result text goes to alpha --- )
 "decbase" [ {bb} ! cla {xr} @ f>s dup 0 < if 0 swap - then {hv} !
@@ -261,6 +288,8 @@
 "sto?" [ {ln} @ len 4 > 0 lc@ 115 = and 1 lc@ 116 = and 2 lc@ 111 = and 3 lc@ 32 = and ] define
 "rcl?" [ {ln} @ len 4 > 0 lc@ 114 = and 1 lc@ 99 = and 2 lc@ 108 = and 3 lc@ 32 = and ] define
 "fix?" [ {ln} @ len 4 > 0 lc@ 102 = and 1 lc@ 105 = and 2 lc@ 120 = and 3 lc@ 32 = and ] define
+"stoi?" [ {ln} @ len 8 > 0 lc@ 115 = and 1 lc@ 116 = and 2 lc@ 111 = and 3 lc@ 32 = and 4 lc@ 105 = and 5 lc@ 110 = and 6 lc@ 100 = and 7 lc@ 32 = and ] define
+"rcli?" [ {ln} @ len 8 > 0 lc@ 114 = and 1 lc@ 99 = and 2 lc@ 108 = and 3 lc@ 32 = and 4 lc@ 105 = and 5 lc@ 110 = and 6 lc@ 100 = and 7 lc@ 32 = and ] define
 "asto?" [ {ln} @ len 5 > 0 lc@ 97 = and 1 lc@ 115 = and 2 lc@ 116 = and 3 lc@ 111 = and 4 lc@ 32 = and ] define
 "arcl?" [ {ln} @ len 5 > 0 lc@ 97 = and 1 lc@ 114 = and 2 lc@ 99 = and 3 lc@ 108 = and 4 lc@ 32 = and ] define
 
@@ -295,6 +324,14 @@
   {ln} @ "x^2" str= if hpsq 1 {hd} ! then
   {ln} @ "enter" str= if enter 1 {hd} ! then
   {ln} @ "swap" str= if xy 1 {hd} ! then
+  {ln} @ "RIGHT" str= if xy 1 {hd} ! then
+  {ln} @ "LEFT" str= if xy 1 {hd} ! then
+  {ln} @ "right" str= if xy 1 {hd} ! then
+  {ln} @ "left" str= if xy 1 {hd} ! then
+  {ln} @ "DOWN" str= if hpdrop 1 {hd} ! then
+  {ln} @ "down" str= if hpdrop 1 {hd} ! then
+  {ln} @ "UP" str= if rup 1 {hd} ! then
+  {ln} @ "up" str= if rup 1 {hd} ! then
   {ln} @ "xy" str= if xy 1 {hd} ! then
   {ln} @ "rdn" str= if rdn 1 {hd} ! then
   {ln} @ "rup" str= if rup 1 {hd} ! then
@@ -329,6 +366,13 @@
   {ln} @ "bindec" str= if bindec 1 {hd} ! then
   {ln} @ "decoct" str= if decoct 1 {hd} ! then
   {ln} @ "octdec" str= if octdec 1 {hd} ! then
+  {ln} @ "int" str= if hpint 1 {hd} ! then
+  {ln} @ "frc" str= if hpfrc 1 {hd} ! then
+  {ln} @ "rnd" str= if hprnd 1 {hd} ! then
+  {ln} @ "r^" str= if rup 1 {hd} ! then
+  {ln} @ "arcl x" str= if arclx 1 {hd} ! then
+  stoi? if 8 arg-at hpstoi 1 {hd} ! then
+  rcli? if 8 arg-at hprcli 1 {hd} ! then
   asto? if 5 arg-at asto 1 {hd} ! then
   arcl? if 5 arg-at arcl 1 {hd} ! then
   sto? if arg2 hpsto 1 {hd} ! then
