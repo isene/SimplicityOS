@@ -244,7 +244,10 @@
     7 clrline 8 clrline 9 clrline
     0 7 screen-set 15 color! "> " .
     read-line {ln} !
-    {ln} @ "q" str= not {ln} @ "off" str= not and while
+    {ln} @ "q" str= not
+    {ln} @ "off" str= not and
+    {ln} @ "end" str= not and
+    {ln} @ "END" str= not and while
     0 8 screen-set
     xstep
   repeat
