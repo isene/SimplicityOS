@@ -33,6 +33,9 @@ long_mode_64:
     mov es, ax
     mov ss, ax
 
+    ; Initialize x87 FPU (float words use it; exceptions masked)
+    fninit
+
     ; Clear screen in 64-bit mode (2000 cells = 500 qwords)
     mov rdi, 0xB8000
     mov rcx, 500
@@ -1875,6 +1878,11 @@ lookup_word:
 
 .not_in_dict:
 
+    ; Float words: s>f plus everything starting with 'f'
+    call match_float_word
+    test rax, rax
+    jnz .done
+
     ; Check single-char operators first
     cmp rcx, 1
     jne .check_multi
@@ -3466,6 +3474,702 @@ word_not:
     ret
 .not_true:
     mov r14, -1
+    ret
+
+; ============================================================
+; Floating point words (x87)
+; Doubles live as raw IEEE-754 bits in ordinary stack cells.
+; Dedicated f-words operate on them; f. prints with FIX digits.
+; ============================================================
+
+; Scratch and configuration
+fp_tmp1: dq 0
+fp_tmp2: dq 0
+fp_cw:   dw 0                   ; saved control word
+fp_cw2:  dw 0                   ; truncation control word
+fp_half: dq 0.5
+fix_digits: dq 4                ; decimals for f. (0-9)
+fp_pow10:                       ; 10^0 .. 10^9 as doubles
+    dq 1.0, 10.0, 100.0, 1000.0, 10000.0
+    dq 100000.0, 1000000.0, 10000000.0, 100000000.0, 1000000000.0
+ip_pow10:                       ; 10^0 .. 10^9 as integers
+    dq 1, 10, 100, 1000, 10000
+    dq 100000, 1000000, 10000000, 100000000, 1000000000
+
+; Switch x87 rounding to truncate / restore
+fp_trunc_on:
+    fnstcw [fp_cw]
+    mov ax, [fp_cw]
+    or ax, 0x0C00
+    mov [fp_cw2], ax
+    fldcw [fp_cw2]
+    ret
+fp_trunc_off:
+    fldcw [fp_cw]
+    ret
+
+word_sf:
+    ; s>f ( n -- f ) integer to float
+    mov [fp_tmp1], r14
+    fild qword [fp_tmp1]
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fs:
+    ; f>s ( f -- n ) truncate toward zero
+    mov [fp_tmp1], r14
+    fld qword [fp_tmp1]
+    call fp_trunc_on
+    fistp qword [fp_tmp1]
+    call fp_trunc_off
+    mov r14, [fp_tmp1]
+    ret
+
+word_fadd:
+    ; f+ ( a b -- a+b )
+    BINOP_POP
+    mov [fp_tmp2], r14
+    mov rax, [r15]
+    mov [fp_tmp1], rax
+    fld qword [fp_tmp1]
+    fld qword [fp_tmp2]
+    faddp
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fsub:
+    ; f- ( a b -- a-b )
+    BINOP_POP
+    mov [fp_tmp2], r14
+    mov rax, [r15]
+    mov [fp_tmp1], rax
+    fld qword [fp_tmp1]
+    fld qword [fp_tmp2]
+    fsubp
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fmul:
+    ; f* ( a b -- a*b )
+    BINOP_POP
+    mov [fp_tmp2], r14
+    mov rax, [r15]
+    mov [fp_tmp1], rax
+    fld qword [fp_tmp1]
+    fld qword [fp_tmp2]
+    fmulp
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fdiv:
+    ; f/ ( a b -- a/b )
+    BINOP_POP
+    mov [fp_tmp2], r14
+    mov rax, [r15]
+    mov [fp_tmp1], rax
+    fld qword [fp_tmp1]
+    fld qword [fp_tmp2]
+    fdivp
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+; Comparison helper: loads a,b; after fucompp+fnstsw+sahf:
+;   ZF = (a=b), CF = (b<a), PF = unordered (NaN)
+fp_compare:
+    mov [fp_tmp2], r14
+    mov rax, [r15]
+    mov [fp_tmp1], rax
+    fld qword [fp_tmp1]         ; a
+    fld qword [fp_tmp2]         ; b (ST0), a (ST1)
+    fucompp
+    fnstsw ax
+    sahf
+    ret
+
+word_flt:
+    ; f< ( a b -- flag )  a<b means b>a: CF=0 and ZF=0
+    BINOP_POP
+    call fp_compare
+    jp .flt_false               ; NaN: false
+    seta al
+    movzx r14, al
+    neg r14
+    ret
+.flt_false:
+    xor r14, r14
+    ret
+
+word_fgt:
+    ; f> ( a b -- flag )  a>b means b<a: CF=1
+    BINOP_POP
+    call fp_compare
+    jp .fgt_false               ; NaN: false
+    setb al
+    movzx r14, al
+    neg r14
+    ret
+.fgt_false:
+    xor r14, r14
+    ret
+
+word_feq:
+    ; f= ( a b -- flag )
+    BINOP_POP
+    call fp_compare
+    jp .feq_false               ; NaN: false
+    sete al
+    movzx r14, al
+    neg r14
+    ret
+.feq_false:
+    xor r14, r14
+    ret
+
+word_fneg:
+    ; fneg ( f -- -f )
+    btc r14, 63
+    ret
+
+word_fabs2:
+    ; fabs ( f -- |f| )
+    btr r14, 63
+    ret
+
+word_fsqrt:
+    ; fsqrt ( f -- sqrt f )
+    mov [fp_tmp1], r14
+    fld qword [fp_tmp1]
+    fsqrt
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fsin:
+    ; fsin ( f -- sin f ) radians
+    mov [fp_tmp1], r14
+    fld qword [fp_tmp1]
+    fsin
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fcos:
+    ; fcos ( f -- cos f )
+    mov [fp_tmp1], r14
+    fld qword [fp_tmp1]
+    fcos
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_ftan:
+    ; ftan ( f -- tan f )
+    mov [fp_tmp1], r14
+    fld qword [fp_tmp1]
+    fptan
+    fstp st0                    ; drop the pushed 1.0
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fatan:
+    ; fatan ( f -- atan f )
+    mov [fp_tmp1], r14
+    fld qword [fp_tmp1]         ; x
+    fld1                        ; 1 (ST0), x (ST1)
+    fpatan                      ; atan(x/1)
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fln:
+    ; fln ( f -- ln f )
+    mov [fp_tmp1], r14
+    fldln2
+    fld qword [fp_tmp1]
+    fyl2x                       ; ln2 * log2(x)
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_flog:
+    ; flog ( f -- log10 f )
+    mov [fp_tmp1], r14
+    fldlg2
+    fld qword [fp_tmp1]
+    fyl2x
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+; Shared 2^t tail: ST0 = t, leaves ST0 = 2^t
+fp_two_to:
+    fld st0
+    frndint                     ; n, t
+    fsub st1, st0               ; n, f=t-n  (|f| <= 0.5)
+    fxch st1                    ; f, n
+    f2xm1                       ; 2^f-1, n
+    fld1
+    faddp                       ; 2^f, n
+    fscale                      ; 2^f * 2^n, n
+    fstp st1
+    ret
+
+word_fexp:
+    ; fexp ( f -- e^f )
+    mov [fp_tmp1], r14
+    fld qword [fp_tmp1]
+    fldl2e
+    fmulp                       ; t = f * log2(e)
+    call fp_two_to
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fpow:
+    ; fpow ( a b -- a^b )  via 2^(b*log2 a); a must be positive
+    BINOP_POP
+    mov [fp_tmp2], r14
+    mov rax, [r15]
+    mov [fp_tmp1], rax
+    fld qword [fp_tmp2]         ; b
+    fld qword [fp_tmp1]         ; a (ST0), b (ST1)
+    fyl2x                       ; t = b * log2(a)
+    call fp_two_to
+    fstp qword [fp_tmp1]
+    mov r14, [fp_tmp1]
+    ret
+
+word_fpi:
+    ; fpi ( -- pi )
+    fldpi
+    fstp qword [fp_tmp1]
+    mov [r15], r14
+    add r15, 8
+    mov r14, [fp_tmp1]
+    ret
+
+word_fix:
+    ; fix ( n -- ) set decimals for f. (clamped 0-9)
+    mov rax, r14
+    cmp rax, 0
+    jge .fix_lo_ok
+    xor rax, rax
+.fix_lo_ok:
+    cmp rax, 9
+    jle .fix_hi_ok
+    mov rax, 9
+.fix_hi_ok:
+    mov [fix_digits], rax
+    sub r15, 8
+    cmp r15, data_stack
+    jl .fix_empty
+    mov r14, [r15]
+    ret
+.fix_empty:
+    mov r15, data_stack
+    xor r14, r14
+    ret
+
+word_fdot:
+    ; f. ( f -- ) print with fix_digits decimals
+    push rbx
+    push r8
+    push r9
+    push r10
+
+    mov r8, r14                 ; value bits
+
+    ; Pop
+    sub r15, 8
+    cmp r15, data_stack
+    jl .fd_empty
+    mov r14, [r15]
+    jmp .fd_go
+.fd_empty:
+    mov r15, data_stack
+    xor r14, r14
+.fd_go:
+
+    ; Sign
+    bt r8, 63
+    jnc .fd_pos
+    mov al, '-'
+    call emit_char
+    btr r8, 63
+.fd_pos:
+
+    ; Inf/NaN: exponent field all ones
+    mov rbx, r8
+    shr rbx, 52
+    and rbx, 0x7FF
+    cmp rbx, 0x7FF
+    jne .fd_finite
+    mov rbx, r8
+    mov rax, 0x000FFFFFFFFFFFFF
+    test rbx, rax
+    jnz .fd_nan
+    mov al, 'i'
+    call emit_char
+    mov al, 'n'
+    call emit_char
+    mov al, 'f'
+    call emit_char
+    jmp .fd_done
+.fd_nan:
+    mov al, 'n'
+    call emit_char
+    mov al, 'a'
+    call emit_char
+    mov al, 'n'
+    call emit_char
+    jmp .fd_done
+
+.fd_finite:
+    mov [fp_tmp1], r8
+    fld qword [fp_tmp1]         ; x (>= 0)
+
+    ; Integer part (truncated)
+    call fp_trunc_on
+    fld st0
+    fistp qword [fp_tmp2]
+    call fp_trunc_off
+    mov r9, [fp_tmp2]           ; i
+    mov rax, 0x8000000000000000
+    cmp r9, rax
+    jne .fd_int_ok
+    fstp st0
+    mov al, '('
+    call emit_char
+    mov al, 'b'
+    call emit_char
+    mov al, 'i'
+    call emit_char
+    mov al, 'g'
+    call emit_char
+    mov al, ')'
+    call emit_char
+    jmp .fd_done
+.fd_int_ok:
+
+    ; Fraction = x - i  (in [0,1))
+    fild qword [fp_tmp2]
+    fsubp st1, st0
+
+    mov r10, [fix_digits]
+    test r10, r10
+    jnz .fd_have_frac
+    ; FIX 0: round using the fraction, print integer only
+    fadd qword [fp_half]
+    call fp_trunc_on
+    fistp qword [fp_tmp2]
+    call fp_trunc_off
+    mov rax, [fp_tmp2]
+    add r9, rax
+    mov rax, r9
+    call print_number
+    jmp .fd_done
+
+.fd_have_frac:
+    ; Scale, round, truncate to integer fraction
+    fmul qword [fp_pow10 + r10*8]
+    fadd qword [fp_half]
+    call fp_trunc_on
+    fistp qword [fp_tmp2]
+    call fp_trunc_off
+    mov rbx, [fp_tmp2]          ; rounded fraction
+
+    ; Carry: fraction rounded up to 10^d
+    cmp rbx, [ip_pow10 + r10*8]
+    jne .fd_no_carry
+    inc r9
+    xor rbx, rbx
+.fd_no_carry:
+
+    ; Print integer part, point, zero-padded fraction
+    mov rax, r9
+    call print_number
+    mov al, '.'
+    call emit_char
+
+.fd_frac_loop:
+    dec r10
+    js .fd_done
+    mov rax, rbx
+    xor rdx, rdx
+    div qword [ip_pow10 + r10*8]
+    ; rax = digit, rdx = remainder
+    mov rbx, rdx
+    add al, '0'
+    call emit_char
+    jmp .fd_frac_loop
+
+.fd_done:
+    mov al, ' '
+    call emit_char
+    pop r10
+    pop r9
+    pop r8
+    pop rbx
+    ret
+
+; match_float_word: RDI = token (lowercased), RCX = length
+; Returns RAX = word address or 0
+match_float_word:
+    ; s>f
+    cmp rcx, 3
+    jne .mf_not_sf
+    cmp byte [rdi], 's'
+    jne .mf_not_sf
+    cmp byte [rdi+1], '>'
+    jne .mf_no
+    cmp byte [rdi+2], 'f'
+    jne .mf_no
+    mov rax, word_sf
+    ret
+.mf_not_sf:
+    cmp byte [rdi], 'f'
+    jne .mf_no
+    cmp rcx, 2
+    je .mf_len2
+    cmp rcx, 3
+    je .mf_len3
+    cmp rcx, 4
+    je .mf_len4
+    cmp rcx, 5
+    je .mf_len5
+    jmp .mf_no
+
+.mf_len2:
+    mov al, [rdi+1]
+    cmp al, '+'
+    je .mf_fadd
+    cmp al, '-'
+    je .mf_fsub
+    cmp al, '*'
+    je .mf_fmul
+    cmp al, '/'
+    je .mf_fdiv
+    cmp al, '<'
+    je .mf_flt
+    cmp al, '>'
+    je .mf_fgt
+    cmp al, '='
+    je .mf_feq
+    cmp al, '.'
+    je .mf_fdot
+    jmp .mf_no
+
+.mf_len3:
+    ; fix fpi fln f>s
+    mov al, [rdi+1]
+    cmp al, 'i'
+    je .mf_chk_fix
+    cmp al, 'p'
+    je .mf_chk_fpi
+    cmp al, 'l'
+    je .mf_chk_fln
+    cmp al, '>'
+    je .mf_chk_fs
+    jmp .mf_no
+.mf_chk_fix:
+    cmp byte [rdi+2], 'x'
+    jne .mf_no
+    mov rax, word_fix
+    ret
+.mf_chk_fpi:
+    cmp byte [rdi+2], 'i'
+    jne .mf_no
+    mov rax, word_fpi
+    ret
+.mf_chk_fln:
+    cmp byte [rdi+2], 'n'
+    jne .mf_no
+    mov rax, word_fln
+    ret
+.mf_chk_fs:
+    cmp byte [rdi+2], 's'
+    jne .mf_no
+    mov rax, word_fs
+    ret
+
+.mf_len4:
+    ; fneg fabs fsin fcos ftan fexp fpow flog (second char unique;
+    ; 'r' falls through for the existing word free)
+    mov al, [rdi+1]
+    cmp al, 'n'
+    je .mf_fneg
+    cmp al, 'a'
+    je .mf_fabs
+    cmp al, 's'
+    je .mf_fsin
+    cmp al, 'c'
+    je .mf_fcos
+    cmp al, 't'
+    je .mf_ftan
+    cmp al, 'e'
+    je .mf_fexp
+    cmp al, 'p'
+    je .mf_fpow
+    cmp al, 'l'
+    je .mf_flog
+    jmp .mf_no
+
+.mf_len5:
+    ; fsqrt fatan
+    mov al, [rdi+1]
+    cmp al, 's'
+    je .mf_fsqrt
+    cmp al, 'a'
+    je .mf_fatan
+    jmp .mf_no
+
+.mf_fadd:  mov rax, word_fadd
+    ret
+.mf_fsub:  mov rax, word_fsub
+    ret
+.mf_fmul:  mov rax, word_fmul
+    ret
+.mf_fdiv:  mov rax, word_fdiv
+    ret
+.mf_flt:   mov rax, word_flt
+    ret
+.mf_fgt:   mov rax, word_fgt
+    ret
+.mf_feq:   mov rax, word_feq
+    ret
+.mf_fdot:  mov rax, word_fdot
+    ret
+.mf_fneg:  mov rax, word_fneg
+    ret
+.mf_fabs:  mov rax, word_fabs2
+    ret
+.mf_fsin:  mov rax, word_fsin
+    ret
+.mf_fcos:  mov rax, word_fcos
+    ret
+.mf_ftan:  mov rax, word_ftan
+    ret
+.mf_fexp:  mov rax, word_fexp
+    ret
+.mf_fpow:  mov rax, word_fpow
+    ret
+.mf_flog:  mov rax, word_flog
+    ret
+.mf_fsqrt: mov rax, word_fsqrt
+    ret
+.mf_fatan: mov rax, word_fatan
+    ret
+.mf_no:
+    xor rax, rax
+    ret
+
+; try_parse_float: RDI = token, RCX = length
+; Returns RDX=1 and RAX=IEEE-754 bits if the token is a float literal
+; (optional -, digits, exactly one ., only digits otherwise).
+; Preserves RDI, RCX.
+try_parse_float:
+    push rbx
+    push rsi
+    push r8
+    push r9
+    push r10
+    push r11
+    push rdi
+    push rcx
+
+    xor r8, r8                  ; sign flag
+    xor rbx, rbx                ; integer part
+    xor r9, r9                  ; fraction digits value
+    xor r10, r10                ; fraction digit count
+    xor r11, r11                ; dot seen / any-digit (bit0 dot, bit1 digit)
+
+    cmp rcx, 2
+    jl .pf_no                   ; too short to be a float
+
+    cmp byte [rdi], '-'
+    jne .pf_scan
+    mov r8, 1
+    inc rdi
+    dec rcx
+    jz .pf_no
+
+.pf_scan:
+    test rcx, rcx
+    jz .pf_check
+    mov al, [rdi]
+    cmp al, '.'
+    je .pf_dot
+    cmp al, '0'
+    jb .pf_no
+    cmp al, '9'
+    ja .pf_no
+    ; digit
+    or r11, 2
+    sub al, '0'
+    movzx rsi, al
+    test r11, 1
+    jnz .pf_frac_digit
+    imul rbx, 10
+    add rbx, rsi
+    jmp .pf_next
+.pf_frac_digit:
+    cmp r10, 9
+    jae .pf_next                ; ignore digits beyond 9 decimals
+    imul r9, 10
+    add r9, rsi
+    inc r10
+    jmp .pf_next
+.pf_dot:
+    test r11, 1
+    jnz .pf_no                  ; second dot: not a float
+    or r11, 1
+.pf_next:
+    inc rdi
+    dec rcx
+    jmp .pf_scan
+
+.pf_check:
+    ; Need a dot and at least one digit
+    cmp r11, 3
+    jne .pf_no
+
+    ; Build double: int + frac/10^count
+    mov [fp_tmp1], rbx
+    fild qword [fp_tmp1]
+    test r10, r10
+    jz .pf_no_frac
+    mov [fp_tmp2], r9
+    fild qword [fp_tmp2]
+    fdiv qword [fp_pow10 + r10*8]
+    faddp
+.pf_no_frac:
+    fstp qword [fp_tmp1]
+    mov rax, [fp_tmp1]
+    test r8, r8
+    jz .pf_positive
+    bts rax, 63
+.pf_positive:
+    mov rdx, 1
+    jmp .pf_out
+
+.pf_no:
+    xor rdx, rdx
+    xor rax, rax
+.pf_out:
+    pop rcx
+    pop rdi
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rsi
+    pop rbx
     ret
 
 word_dot:
@@ -5723,6 +6427,29 @@ builtin_info_table:
     db 'remove', 0, '( "name" -- ) Remove user word', 0
     db 'define', 0, '( "name" { body } -- ) Define new word', 0
     db 'sort', 0, '( array -- array ) Sort array in place', 0
+    db 's>f', 0, '( n -- f ) Integer to float', 0
+    db 'f>s', 0, '( f -- n ) Float to integer, truncated', 0
+    db 'f+', 0, '( a b -- a+b ) Float add', 0
+    db 'f-', 0, '( a b -- a-b ) Float subtract', 0
+    db 'f*', 0, '( a b -- a*b ) Float multiply', 0
+    db 'f/', 0, '( a b -- a/b ) Float divide', 0
+    db 'f<', 0, '( a b -- flag ) Float less-than', 0
+    db 'f>', 0, '( a b -- flag ) Float greater-than', 0
+    db 'f=', 0, '( a b -- flag ) Float equal', 0
+    db 'f.', 0, '( f -- ) Print float with fix decimals', 0
+    db 'fix', 0, '( n -- ) Set f. decimals (0-9)', 0
+    db 'fpi', 0, '( -- pi ) Push pi', 0
+    db 'fneg', 0, '( f -- -f ) Negate float', 0
+    db 'fabs', 0, '( f -- |f| ) Float absolute value', 0
+    db 'fsqrt', 0, '( f -- sqrt ) Square root', 0
+    db 'fsin', 0, '( f -- sin ) Sine, radians', 0
+    db 'fcos', 0, '( f -- cos ) Cosine, radians', 0
+    db 'ftan', 0, '( f -- tan ) Tangent, radians', 0
+    db 'fatan', 0, '( f -- atan ) Arc tangent', 0
+    db 'fln', 0, '( f -- ln ) Natural log', 0
+    db 'flog', 0, '( f -- log ) Base-10 log', 0
+    db 'fexp', 0, '( f -- e^f ) Exponential', 0
+    db 'fpow', 0, '( a b -- a^b ) Power, a positive', 0
     db 0  ; End of table
 
 ; ============================================================
@@ -6706,7 +7433,7 @@ word_words:
     pop rbx
     ret
 
-str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write save restore info remove define sort allot load edit', 0
+str_builtins: db '+ - * / mod = < > <> <= >= 0= and or xor not . .s dup drop swap rot over @ ! c@ c! emit cr : ; ~ ? words execute len type array at put [ ] type-new type-name type-set type-name? screen-* key? key-* if then else begin until while repeat again app-* disk-read disk-write save restore info remove define sort allot load edit s>f f>s f+ f- f* f/ f< f> f= f. fix fpi fneg fabs fsqrt fsin fcos ftan fatan fln flog fexp fpow', 0
 words_buffer: times 8192 db 0   ; Buffer for word list
 word_ptrs: times 512 dq 0       ; Pointers to words (max 512 words)
 word_lens: times 512 db 0       ; Lengths of words
@@ -7126,6 +7853,11 @@ interpret_line:
     je .iline_save_name
 
     ; Check if number
+    ; Float literal? (digits with one dot, e.g. 3.14)
+    call try_parse_float
+    test rdx, rdx
+    jnz .iline_float
+
     call is_number
     test rax, rax
     jnz .iline_push_number
@@ -7253,6 +7985,62 @@ interpret_line:
     add rbx, 8
     mov [array_collect_ptr], rbx
 .iline_number_full:
+    pop rbx
+    jmp .iline_parse_loop
+
+.iline_float:
+    ; Float literal in RAX (raw double bits)
+    cmp byte [array_mode], 1
+    je .iline_float_to_array
+    cmp byte [compile_mode], 0
+    jne .iline_float_compile
+    ; Interpret: push raw bits
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+    jmp .iline_parse_loop
+
+.iline_float_compile:
+    mov rbx, [compile_ptr]
+    cmp rbx, compile_buffer + 4096*8 - 64
+    jae .iline_parse_loop
+    mov qword [rbx], LIT
+    mov [rbx+8], rax
+    add rbx, 16
+    mov [compile_ptr], rbx
+    jmp .iline_parse_loop
+
+.iline_float_to_array:
+    ; Positive double bits are huge values: define classifies them as
+    ; literals untouched. Negatives would collide with bit-63 tagging,
+    ; so store the absolute value plus a reference to fneg.
+    ; 0.0 has bits 0: store as tagged integer zero (same value).
+    push rbx
+    mov rbx, [array_collect_ptr]
+    cmp rbx, array_collect_buffer + 4096 - 16
+    jae .iline_flt_full
+    test rax, rax
+    jnz .iline_flt_nonzero
+    mov rax, 0x8000000000000000 ; tagged 0
+    mov [rbx], rax
+    add rbx, 8
+    jmp .iline_flt_store_done
+.iline_flt_nonzero:
+    bt rax, 63
+    jnc .iline_flt_pos
+    btr rax, 63
+    mov [rbx], rax
+    add rbx, 8
+    mov rax, word_fneg
+    mov [rbx], rax
+    add rbx, 8
+    jmp .iline_flt_store_done
+.iline_flt_pos:
+    mov [rbx], rax
+    add rbx, 8
+.iline_flt_store_done:
+    mov [array_collect_ptr], rbx
+.iline_flt_full:
     pop rbx
     jmp .iline_parse_loop
 

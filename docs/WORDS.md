@@ -722,6 +722,27 @@ square cube ... ok
 ### I/O
 `emit` `cr` `key` `key?`
 
+### Float
+Doubles live as raw IEEE-754 bits in ordinary stack cells; only
+f-words interpret them. Literals: `3.14`, `-0.5` (no exponent form).
+
+| Words | Stack | Notes |
+|-------|-------|-------|
+| `s>f` | ( n -- f ) | integer to float |
+| `f>s` | ( f -- n ) | truncated |
+| `f+ f- f* f/` | ( a b -- r ) | arithmetic |
+| `f< f> f=` | ( a b -- flag ) | comparison |
+| `fneg fabs fsqrt` | ( f -- r ) | |
+| `fsin fcos ftan fatan` | ( f -- r ) | radians |
+| `fln flog fexp` | ( f -- r ) | |
+| `fpow` | ( a b -- a^b ) | a positive |
+| `fpi` | ( -- pi ) | |
+| `fix` | ( n -- ) | set decimals 0-9 |
+| `f.` | ( f -- ) | print |
+
+`.` prints float bits as a large integer; use `f.`. Integer parts
+beyond 2^63 print as "(big)".
+
 ### Screen
 `screen-char` `screen-clear` `screen-get` `screen-line-shift`
 `screen-scroll` `screen-set` `cursor-hide` `cursor-show`

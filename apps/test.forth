@@ -81,3 +81,11 @@
 "at1" [ 68 {k} ! left? ] define
 "at2" [ 67 {k} ! right? ] define
 "at3" [ 0 {bf} ! 65 {k} ! fire? ] define
+"ft1" [ 2.0 fsqrt ] define
+"ft2" [ 1.0 fexp ] define
+"ft3" [ fpi 2.0 f/ fsin ] define
+"ft4" [ 1.5 2.5 f< ] define
+"ft5" [ -2.5 fabs ] define
+"ft6" [ 2.0 10.0 fpow ] define
+"ft7" [ 7 s>f 2.0 f/ ] define
+"ft8" [ 3.75 f>s ] define

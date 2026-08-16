@@ -1,5 +1,21 @@
 # Simplicity OS - Changelog
 
+## [0.6.0] - 2026-08-16 - Floating Point
+
+First step of the XRPN port: the kernel speaks floats.
+
+- 23 x87 float words: s>f f>s f+ f- f* f/ f< f> f= fneg fabs fsqrt
+  fsin fcos ftan fatan fln flog fexp fpow fpi fix f.
+- Doubles are raw IEEE-754 bits in ordinary stack cells; f-words
+  interpret them, f. prints with FIX-style decimals (default 4)
+- Float literals parse at the REPL and in definitions (3.14, -0.5);
+  negative literals in define bodies compile as abs value + fneg to
+  stay clear of the bit-63 literal tagging
+- FPU initialized at kernel entry; works on BIOS and UEFI paths
+- Regression probes ft1-ft8 in apps/test.forth
+- Verified in QEMU: sqrt(2)=1.4142, e=2.7183, sin(pi/2)=1.0000,
+  2^10=1024, truncation, comparisons, FIX 0/2/4 display
+
 ## [0.5.0] - 2026-08-16 - Real Hardware Boot, Architectural Fixes
 
 ### Real hardware
