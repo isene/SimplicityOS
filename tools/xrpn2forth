@@ -29,10 +29,19 @@ SIMPLE = {
     'cla': 'cla', 'aleng': 'aleng',
     'mean': 'mean', 'sdev': 'sdev', 'cls': 'cls',
     'splus': 'splus', 'sminus': 'sminus',
+    'asin': 'hpasin', 'acos': 'hpacos', 'mod': 'hpmod',
+    'fact': 'hpfact', '%': 'hpperc', 'cube': 'hpcube',
+    'drop': 'hpdrop', 'dropy': 'hpdropy',
+    'xtoa': 'xtoa', 'atox': 'atox', 'arot': 'arot',
+    'deg': 'deg', 'rad': 'rad',
+    'dechex': 'dechex', 'hexdec': 'hexdec',
+    'decbin': 'decbin', 'bindec': 'bindec',
+    'decoct': 'decoct', 'octdec': 'octdec',
 }
 REG_OPS = {'sto': 'hpsto', 'rcl': 'hprcl', 'st+': 'hpst+',
            'st-': 'hpst-', 'st*': 'hpst*', 'st/': 'hpst/',
-           'sf': 'hpsf', 'cf': 'hpcf'}
+           'sf': 'hpsf', 'cf': 'hpcf',
+           'asto': 'asto', 'arcl': 'arcl'}
 PREDICATES = {'x=0?', 'x!=0?', 'x<0?', 'x>0?', 'x<=0?', 'x>=0?',
               'x=y?', 'x!=y?', 'x<y?', 'x>y?', 'x<=y?', 'x>=y?'}
 NUM_RE = re.compile(r'^-?\d+(\.\d+)?(e-?\d+)?$')

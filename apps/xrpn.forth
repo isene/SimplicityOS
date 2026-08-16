@@ -26,16 +26,31 @@
 "hp/" [ {xr} @ {lr} ! {yr} @ {xr} @ f/ {zr} @ {yr} ! {tr} @ {zr} ! {xr} ! ] define
 "hppow" [ {xr} @ {lr} ! {yr} @ {xr} @ fpow {zr} @ {yr} ! {tr} @ {zr} ! {xr} ! ] define
 
+( --- angle mode: HP boots in degrees --- )
+1 {degm} !
+"deg" [ 1 {degm} ! ] define
+"rad" [ 0 {degm} ! ] define
+"torad" [ {degm} @ 1 = if fpi f* 180.0 f/ then ] define
+"fromrad" [ {degm} @ 1 = if 180.0 f* fpi f/ then ] define
+
 ( --- unary on X, L = old X --- )
 "hpchs" [ {xr} @ fneg {xr} ! ] define
 "hpabs" [ {xr} @ {lr} ! {xr} @ fabs {xr} ! ] define
 "hpsqrt" [ {xr} @ {lr} ! {xr} @ fsqrt {xr} ! ] define
 "hpsq" [ {xr} @ {lr} ! {xr} @ {xr} @ f* {xr} ! ] define
 "hpinv" [ {xr} @ {lr} ! 1.0 {xr} @ f/ {xr} ! ] define
-"hpsin" [ {xr} @ {lr} ! {xr} @ fsin {xr} ! ] define
-"hpcos" [ {xr} @ {lr} ! {xr} @ fcos {xr} ! ] define
-"hptan" [ {xr} @ {lr} ! {xr} @ ftan {xr} ! ] define
-"hpatan" [ {xr} @ {lr} ! {xr} @ fatan {xr} ! ] define
+"hpsin" [ {xr} @ {lr} ! {xr} @ torad fsin {xr} ! ] define
+"hpcos" [ {xr} @ {lr} ! {xr} @ torad fcos {xr} ! ] define
+"hptan" [ {xr} @ {lr} ! {xr} @ torad ftan {xr} ! ] define
+"hpatan" [ {xr} @ {lr} ! {xr} @ fatan fromrad {xr} ! ] define
+"hpasin" [ {xr} @ {lr} ! {xr} @ dup dup f* 1.0 swap f- fsqrt f/ fatan fromrad {xr} ! ] define
+"hpacos" [ {xr} @ {lr} ! {xr} @ dup dup f* 1.0 swap f- fsqrt f/ fatan fpi 2.0 f/ swap f- fromrad {xr} ! ] define
+"hpcube" [ {xr} @ {lr} ! {xr} @ dup dup f* f* {xr} ! ] define
+"hpfact" [ {xr} @ {lr} ! {xr} @ f>s {fi} ! 1.0 {fa} ! begin {fi} @ 1 > while {fa} @ {fi} @ s>f f* {fa} ! {fi} @ 1 - {fi} ! repeat {fa} @ {xr} ! ] define
+"hpmod" [ {xr} @ {lr} ! {yr} @ {xr} @ f/ f>s s>f {xr} @ f* {yr} @ swap f- {zr} @ {yr} ! {tr} @ {zr} ! {xr} ! ] define
+"hpperc" [ {xr} @ {lr} ! {yr} @ {xr} @ f* 100.0 f/ {xr} ! ] define
+"hpdrop" [ {yr} @ {xr} ! {zr} @ {yr} ! {tr} @ {zr} ! ] define
+"hpdropy" [ {zr} @ {yr} ! {tr} @ {zr} ! ] define
 "hpln" [ {xr} @ {lr} ! {xr} @ fln {xr} ! ] define
 "hplog" [ {xr} @ {lr} ! {xr} @ flog {xr} ! ] define
 "hpexp" [ {xr} @ {lr} ! {xr} @ fexp {xr} ! ] define
@@ -77,6 +92,81 @@
 "cla" [ 0 {hpa} ! ] define
 "aview" [ {hpa} @ 0 = not if {hpa} @ . cr then ] define
 "aleng" [ {hpa} @ 0 = if 0.0 xn else {hpa} @ len s>f xn then ] define
+
+( --- alpha building: new string objects on the heap --- )
+16 allot {hbuf} !
+"anew" [ dup 17 + allot {ns} ! 1 {ns} @ ! {ns} @ 8 + ! {ns} @ ] define
+"alen0" [ {hpa} @ 0 = if 0 else {hpa} @ len then ] define
+
+"acat-ch" [ {ch} ! alen0 {n1} ! {n1} @ 1 + anew {na} !
+  0 {i4} ! begin {i4} @ {n1} @ < while
+    {hpa} @ 16 + {i4} @ + c@ {na} @ 16 + {i4} @ + c!
+    {i4} @ 1 + {i4} ! repeat
+  {ch} @ {na} @ 16 + {n1} @ + c!
+  0 {na} @ 16 + {n1} @ 1 + + c!
+  {na} @ {hpa} ! ] define
+
+"acat-str" [ {as} ! {as} @ len {n2} ! alen0 {n1} !
+  {n1} @ {n2} @ + anew {na} !
+  0 {i4} ! begin {i4} @ {n1} @ < while
+    {hpa} @ 16 + {i4} @ + c@ {na} @ 16 + {i4} @ + c!
+    {i4} @ 1 + {i4} ! repeat
+  0 {i4} ! begin {i4} @ {n2} @ < while
+    {as} @ 16 + {i4} @ + c@ {na} @ 16 + {n1} @ {i4} @ + + c!
+    {i4} @ 1 + {i4} ! repeat
+  0 {na} @ 16 + {n1} @ {n2} @ + + c!
+  {na} @ {hpa} ! ] define
+
+"xtoa" [ {xr} @ f>s acat-ch ] define
+
+"atox" [ alen0 0 = if 0.0 xn else
+  {hpa} @ 16 + c@ s>f xn
+  alen0 1 - {n1} ! {n1} @ anew {na} !
+  0 {i4} ! begin {i4} @ {n1} @ < while
+    {hpa} @ 17 + {i4} @ + c@ {na} @ 16 + {i4} @ + c!
+    {i4} @ 1 + {i4} ! repeat
+  0 {na} @ 16 + {n1} @ + c!
+  {na} @ {hpa} ! then ] define
+
+"arot" [ alen0 {n1} ! {n1} @ 0 = if else
+  {xr} @ f>s {n1} @ mod dup 0 < if {n1} @ + then {r0} !
+  {n1} @ anew {na} !
+  0 {i4} ! begin {i4} @ {n1} @ < while
+    {hpa} @ 16 + {i4} @ {r0} @ + {n1} @ mod + c@ {na} @ 16 + {i4} @ + c!
+    {i4} @ 1 + {i4} ! repeat
+  0 {na} @ 16 + {n1} @ + c!
+  {na} @ {hpa} ! then ] define
+
+"asto" [ regaddr {hpa} @ swap ! ] define
+"arcl" [ regaddr @ dup type 1 = if acat-str else drop then ] define
+
+( --- base conversion: result text goes to alpha --- )
+"decbase" [ {bb} ! cla {xr} @ f>s dup 0 < if 0 swap - then {hv} !
+  0 {hn} ! begin {hv} @ {bb} @ 1 - > while
+    {hv} @ {bb} @ mod {hbuf} @ {hn} @ + c!
+    {hv} @ {bb} @ / {hv} !
+    {hn} @ 1 + {hn} ! repeat
+  {hv} @ {hbuf} @ {hn} @ + c!
+  begin {hn} @ 0 < not while
+    {hbuf} @ {hn} @ + c@ dup 9 > if 55 + else 48 + then acat-ch
+    {hn} @ 1 - {hn} ! repeat ] define
+
+"basedec" [ {bb} ! 0 {hv} ! 0 {i4} ! alen0 {n1} !
+  begin {i4} @ {n1} @ < while
+    {hpa} @ 16 + {i4} @ + c@ {hc} !
+    {hc} @ 48 - {hd2} !
+    {hc} @ 64 > if {hc} @ 55 - {hd2} ! then
+    {hc} @ 96 > if {hc} @ 87 - {hd2} ! then
+    {hv} @ {bb} @ * {hd2} @ + {hv} !
+    {i4} @ 1 + {i4} ! repeat
+  {hv} @ s>f xn ] define
+
+"dechex" [ 16 decbase ] define
+"hexdec" [ 16 basedec ] define
+"decbin" [ 2 decbase ] define
+"bindec" [ 2 basedec ] define
+"decoct" [ 8 decbase ] define
+"octdec" [ 8 basedec ] define
 
 ( --- indirect addressing: register number taken from reg n --- )
 "hpstoi" [ regaddr @ f>s hpsto ] define
@@ -166,10 +256,13 @@
 
 ( --- interactive calculator REPL: type FOCAL, numbers enter X --- )
 "lc@" [ {ln} @ 16 + + c@ ] define
-"arg2" [ {ln} @ len 6 = if 4 lc@ 48 - 10 * 5 lc@ 48 - + else 4 lc@ 48 - then ] define
+"arg-at" [ {ap} ! {ln} @ len {ap} @ 2 + = if {ap} @ lc@ 48 - 10 * {ap} @ 1 + lc@ 48 - + else {ap} @ lc@ 48 - then ] define
+"arg2" [ 4 arg-at ] define
 "sto?" [ {ln} @ len 4 > 0 lc@ 115 = and 1 lc@ 116 = and 2 lc@ 111 = and 3 lc@ 32 = and ] define
 "rcl?" [ {ln} @ len 4 > 0 lc@ 114 = and 1 lc@ 99 = and 2 lc@ 108 = and 3 lc@ 32 = and ] define
 "fix?" [ {ln} @ len 4 > 0 lc@ 102 = and 1 lc@ 105 = and 2 lc@ 120 = and 3 lc@ 32 = and ] define
+"asto?" [ {ln} @ len 5 > 0 lc@ 97 = and 1 lc@ 115 = and 2 lc@ 116 = and 3 lc@ 111 = and 4 lc@ 32 = and ] define
+"arcl?" [ {ln} @ len 5 > 0 lc@ 97 = and 1 lc@ 114 = and 2 lc@ 99 = and 3 lc@ 108 = and 4 lc@ 32 = and ] define
 
 "xnum" [
   app-depth {d0} !
@@ -217,6 +310,27 @@
   {ln} @ "cls" str= if cls 1 {hd} ! then
   {ln} @ "cla" str= if cla 1 {hd} ! then
   {ln} @ "aview" str= if aview 1 {hd} ! then
+  {ln} @ "asin" str= if hpasin 1 {hd} ! then
+  {ln} @ "acos" str= if hpacos 1 {hd} ! then
+  {ln} @ "mod" str= if hpmod 1 {hd} ! then
+  {ln} @ "fact" str= if hpfact 1 {hd} ! then
+  {ln} @ "%" str= if hpperc 1 {hd} ! then
+  {ln} @ "cube" str= if hpcube 1 {hd} ! then
+  {ln} @ "drop" str= if hpdrop 1 {hd} ! then
+  {ln} @ "dropy" str= if hpdropy 1 {hd} ! then
+  {ln} @ "xtoa" str= if xtoa 1 {hd} ! then
+  {ln} @ "atox" str= if atox 1 {hd} ! then
+  {ln} @ "arot" str= if arot 1 {hd} ! then
+  {ln} @ "deg" str= if deg 1 {hd} ! then
+  {ln} @ "rad" str= if rad 1 {hd} ! then
+  {ln} @ "dechex" str= if dechex 1 {hd} ! then
+  {ln} @ "hexdec" str= if hexdec 1 {hd} ! then
+  {ln} @ "decbin" str= if decbin 1 {hd} ! then
+  {ln} @ "bindec" str= if bindec 1 {hd} ! then
+  {ln} @ "decoct" str= if decoct 1 {hd} ! then
+  {ln} @ "octdec" str= if octdec 1 {hd} ! then
+  asto? if 5 arg-at asto 1 {hd} ! then
+  arcl? if 5 arg-at arcl 1 {hd} ! then
   sto? if arg2 hpsto 1 {hd} ! then
   rcl? if arg2 hprcl 1 {hd} ! then
   fix? if arg2 fix 1 {hd} ! then

@@ -16,6 +16,7 @@
 ;   0x100000 - 0x160000  App load buffer
 ;   0x200000 - 0x240000  Dictionary (user definitions)
 ;   0x240000 - 0x248000  Compile buffer
+;   0x248000 - 0x250000  Array collection buffer
 ;   0x260000 - 0x4000000 Heap (grows on demand via #PF, 64MB cap)
 ;   0x074000 - 0x075000  IDT
 ; ============================================================
@@ -8435,7 +8436,7 @@ interpret_line:
     ; Array mode - store reference to collection buffer
     push rbx
     mov rbx, [array_collect_ptr]
-    cmp rbx, array_collect_buffer + 4096
+    cmp rbx, array_collect_buffer + 4096*8
     jae .iline_ref_full
     mov [rbx], rax              ; Store reference
     add rbx, 8
@@ -8504,7 +8505,7 @@ interpret_line:
     ; (bts on a negative is a no-op: bit 63 is already set.)
     push rbx
     mov rbx, [array_collect_ptr]
-    cmp rbx, array_collect_buffer + 4096
+    cmp rbx, array_collect_buffer + 4096*8
     jae .iline_number_full      ; Buffer full: drop element
     bts rax, 63
     mov [rbx], rax
@@ -8543,7 +8544,7 @@ interpret_line:
     ; 0.0 has bits 0: store as tagged integer zero (same value).
     push rbx
     mov rbx, [array_collect_ptr]
-    cmp rbx, array_collect_buffer + 4096 - 16
+    cmp rbx, array_collect_buffer + 4096*8 - 16
     jae .iline_flt_full
     test rax, rax
     jnz .iline_flt_nonzero
@@ -8672,7 +8673,7 @@ interpret_line:
     ; define will wrap it with LIT when processing
     push rbx
     mov rbx, [array_collect_ptr]
-    cmp rbx, array_collect_buffer + 4096
+    cmp rbx, array_collect_buffer + 4096*8
     jae .iline_var_full
     bts rax, 63                 ; Set bit 63 to tag as literal
     mov [rbx], rax
@@ -8773,7 +8774,7 @@ interpret_line:
     ; Store string in collection buffer
     push rbx
     mov rbx, [array_collect_ptr]
-    cmp rbx, array_collect_buffer + 4096
+    cmp rbx, array_collect_buffer + 4096*8
     jae .iline_str_full
     mov [rbx], rax              ; Store string object address
     add rbx, 8
@@ -9241,12 +9242,13 @@ app_loading: dq 1               ; 1 during boot app loading, 0 after (starts at 
 array_mode: db 0                ; 1 if inside array literal, 0 otherwise
 compile_mode: db 0              ; 0 = interpret, 1 = compile
 ctl_items: db 0                 ; Open control-flow constructs while compiling
-array_collect_buffer: times 512 dq 0  ; Temporary buffer for array collection (512 elements max)
+; Array collection buffer lives at 0x248000 (4096 cells, 32KB)
 array_collect_ptr: dq 0         ; Pointer into collection buffer
 dict_here: dq DICT_SPACE  ; Next free space in dictionary
 dict_latest: dq 0               ; Pointer to most recent entry (0 = empty)
 compile_buffer equ 0x240000     ; Compilation buffer (4096 cells, 32KB)
-                                ; lives between dictionary and heap
+array_collect_buffer equ 0x248000 ; Array collection (4096 cells, 32KB)
+                                ; both live between dictionary and heap
 compile_ptr: dq compile_buffer  ; Current compilation position
 new_word_name: times 32 db 0    ; Name of word being defined
 string_pool: times 2048 db 0    ; Temporary string pool
