@@ -3739,6 +3739,8 @@ fp_tmp2: dq 0
 fp_cw:   dw 0                   ; saved control word
 fp_cw2:  dw 0                   ; truncation control word
 fp_half: dq 0.5
+fp_ten:  dq 10.0
+pf_exp:  dq 0
 fix_digits: dq 4                ; decimals for f. (0-9)
 fp_pow10:                       ; 10^0 .. 10^9 as doubles
     dq 1.0, 10.0, 100.0, 1000.0, 10000.0
@@ -4198,6 +4200,20 @@ match_float_word:
     mov rax, word_eval
     ret
 .mf_not_eval:
+    ; read-line (9 chars)
+    cmp rcx, 9
+    jne .mf_not_rl
+    cmp byte [rdi], 'r'
+    jne .mf_not_rl
+    cmp byte [rdi+1], 'e'
+    jne .mf_not_rl
+    cmp byte [rdi+4], '-'
+    jne .mf_not_rl
+    cmp byte [rdi+5], 'l'
+    jne .mf_not_rl
+    mov rax, word_read_line
+    ret
+.mf_not_rl:
     cmp byte [rdi], 'f'
     jne .mf_no
     cmp rcx, 2
@@ -4352,7 +4368,8 @@ try_parse_float:
     xor rbx, rbx                ; integer part
     xor r9, r9                  ; fraction digits value
     xor r10, r10                ; fraction digit count
-    xor r11, r11                ; dot seen / any-digit (bit0 dot, bit1 digit)
+    xor r11, r11                ; bit0 dot, bit1 digit, bit2 exp, bit3 exp-neg
+    mov qword [pf_exp], 0       ; exponent value
 
     cmp rcx, 2
     jl .pf_no                   ; too short to be a float
@@ -4370,14 +4387,18 @@ try_parse_float:
     mov al, [rdi]
     cmp al, '.'
     je .pf_dot
+    cmp al, 'e'
+    je .pf_exp
     cmp al, '0'
     jb .pf_no
     cmp al, '9'
     ja .pf_no
     ; digit
-    or r11, 2
     sub al, '0'
     movzx rsi, al
+    test r11, 4
+    jnz .pf_exp_digit
+    or r11, 2
     test r11, 1
     jnz .pf_frac_digit
     imul rbx, 10
@@ -4390,19 +4411,50 @@ try_parse_float:
     add r9, rsi
     inc r10
     jmp .pf_next
+.pf_exp_digit:
+    mov rax, [pf_exp]
+    imul rax, 10
+    add rax, rsi
+    cmp rax, 999
+    ja .pf_no                   ; absurd exponent
+    mov [pf_exp], rax
+    jmp .pf_next
 .pf_dot:
-    test r11, 1
-    jnz .pf_no                  ; second dot: not a float
+    test r11, 5
+    jnz .pf_no                  ; second dot, or dot after exponent
     or r11, 1
+    jmp .pf_next
+.pf_exp:
+    test r11, 4
+    jnz .pf_no                  ; second e
+    test r11, 2
+    jz .pf_no                   ; e needs a mantissa digit first
+    or r11, 4
+    ; optional sign directly after e
+    cmp rcx, 1
+    je .pf_no                   ; trailing e
+    cmp byte [rdi+1], '-'
+    jne .pf_exp_plus
+    or r11, 8
+    inc rdi
+    dec rcx
+    jmp .pf_next
+.pf_exp_plus:
+    cmp byte [rdi+1], '+'
+    jne .pf_next
+    inc rdi
+    dec rcx
 .pf_next:
     inc rdi
     dec rcx
     jmp .pf_scan
 
 .pf_check:
-    ; Need a dot and at least one digit
-    cmp r11, 3
-    jne .pf_no
+    ; Need at least one digit, and a dot or an exponent
+    test r11, 2
+    jz .pf_no
+    test r11, 5
+    jz .pf_no
 
     ; Build double: int + frac/10^count
     mov [fp_tmp1], rbx
@@ -4414,6 +4466,21 @@ try_parse_float:
     fdiv qword [fp_pow10 + r10*8]
     faddp
 .pf_no_frac:
+    ; Scale by 10^exp (multiply or divide per sign)
+    mov rcx, [pf_exp]
+    test rcx, rcx
+    jz .pf_scaled
+.pf_scale_loop:
+    test r11, 8
+    jnz .pf_scale_div
+    fmul qword [fp_ten]
+    jmp .pf_scale_next
+.pf_scale_div:
+    fdiv qword [fp_ten]
+.pf_scale_next:
+    dec rcx
+    jnz .pf_scale_loop
+.pf_scaled:
     fstp qword [fp_tmp1]
     mov rax, [fp_tmp1]
     test r8, r8
@@ -5204,6 +5271,61 @@ word_eval:
     ret
 
 str_eval_bad: db '(eval needs string or buffer)', 0
+
+word_read_line:
+    ; read-line ( -- str ) read an echoed, editable input line and
+    ; return it as a STRING object. Enter ends; backspace edits.
+    push rbx
+    push rcx
+    push rsi
+    push rdi
+
+    mov rdi, rl_buffer
+    xor rcx, rcx
+.rl_loop:
+    call wait_key
+    cmp rax, 10
+    je .rl_done
+    cmp rax, 8
+    je .rl_backspace
+    cmp rax, 256
+    jae .rl_loop                ; ignore extended keys
+    cmp rax, 32
+    jb .rl_loop                 ; ignore other control chars
+    cmp rcx, 120
+    jae .rl_loop                ; line full
+    mov [rdi + rcx], al
+    inc rcx
+    call emit_char
+    jmp .rl_loop
+
+.rl_backspace:
+    test rcx, rcx
+    jz .rl_loop
+    dec rcx
+    mov rbx, [cursor]
+    sub rbx, 2
+    mov byte [rbx], ' '
+    mov [cursor], rbx
+    call update_hw_cursor
+    jmp .rl_loop
+
+.rl_done:
+    mov byte [rdi + rcx], 0
+    call newline
+    mov rsi, rl_buffer
+    call create_string_from_cstr
+    mov [r15], r14
+    add r15, 8
+    mov r14, rax
+
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rbx
+    ret
+
+rl_buffer: times 128 db 0
 
 word_execute:
     ; Execute code reference from TOS ( ref -- )

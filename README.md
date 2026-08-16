@@ -170,6 +170,16 @@ ok
 ### XRPN (HP-41 calculator layer)
 
 ```forth
+> xrpn          ( interactive calculator: type FOCAL directly )
+x: 0.0000
+5
+x: 5.0000
+3
+x: 3.0000
+sqrt
+x: 1.7321
+q
+
 > xrpn-init
 > 10.0 xn fact
 3628800.0000

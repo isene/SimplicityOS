@@ -513,6 +513,13 @@ out-of-bounds index or non-array pushes "(bad array index)".
 ok
 ```
 
+### read-line
+**Category:** Kernel
+**Stack:** `( -- str )`
+**Description:** Read an echoed, editable input line (Enter ends,
+backspace edits) and return it as a STRING. Powers interactive apps
+like the xrpn calculator REPL.
+
 ### remove
 **Category:** Kernel
 **Stack:** `( name-string -- )`

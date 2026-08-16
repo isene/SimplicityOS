@@ -101,24 +101,24 @@ Both must handle identically:
 
 Offsets are BYTE offsets from current position.
 
-## Known Limitations (updated 2026-08-16)
+## Known Limitations (updated 2026-08-16, v0.9.0)
 
-Fixed in v0.5.0: dictionary overflow, execute's stale interpreter,
-the empty-stack push special cases, negative literals in define
-bodies, unbalanced control words, large-int dereference in `.`,
-REPL array literals, history aliasing, all known buffer overruns.
+Fixed in v0.9.0: exceptions recover to the REPL via a real IDT
+(no more triple-fault reboots), the heap demand-maps pages up to
+64MB, free reclaims memory through a free list, stack guards are
+app-aware, str= matches the other predicates, the REPL idles in
+HLT (0% CPU at the prompt).
 
 Still true by design or unimplemented:
 
-- `free` is a stub; the heap is a bump allocator capped at 4MB.
-  Exhaustion returns "(out of memory)" strings instead of crashing.
-- Page tables map 0-4MB only; "expand on demand" is not implemented.
 - On real hardware without an ATA drive (USB/AHCI/NVMe boot), disk
   reads of sectors 200-447 come from the boot-loaded RAM disk;
   writes do not persist across reboots. Editor file saves (sector
   450+) need a real ATA drive.
-- Stack pop guards clamp against the main data stack even while an
-  app stack is active.
+- No GOP framebuffer console: UEFI machines whose GPU does not
+  decode legacy VGA show nothing. All output would need rewriting.
+- Games busy-poll by design (they need the loop speed); only the
+  REPL idles.
 
 ## XRPN Port Status
 
@@ -135,5 +135,12 @@ Still true by design or unimplemented:
   source; runfile loads an editor file and evals it. Write hp-word
   programs in the editor (:w name), then "name" runfile. mkdemo in
   apps/xrpn.forth shows programmatic file creation.
-- Open: on-OS FOCAL-syntax entry (hp-words are the FOCAL commands,
-  so this is cosmetic), HP-41 RAW import via the translator.
+- Stage 4 (done, v0.9.0): interactive calculator REPL. Type xrpn
+  and enter FOCAL directly: numbers lift into X, commands dispatch
+  by name, sto/rcl/fix take arguments, q quits. Alpha register
+  (aset/aview/cla/aleng), indirect sto/rcl, isg, statistics
+  (splus/sminus/mean/sdev/cls) and EEX float literals (1.5e10)
+  round out the command set.
+- Open: HP-41 RAW import (no RAW test files available; the
+  bytecode notes are partial, so an importer would be unverified
+  guesswork).

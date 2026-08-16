@@ -71,6 +71,54 @@
 "hpx<=y?" [ {xr} @ {yr} @ f> not ] define
 "hpx>=y?" [ {xr} @ {yr} @ f< not ] define
 
+
+( --- alpha register: a STRING object or 0 --- )
+"aset" [ {hpa} ! ] define
+"cla" [ 0 {hpa} ! ] define
+"aview" [ {hpa} @ 0 = not if {hpa} @ . cr then ] define
+"aleng" [ {hpa} @ 0 = if 0.0 xn else {hpa} @ len s>f xn then ] define
+
+( --- indirect addressing: register number taken from reg n --- )
+"hpstoi" [ regaddr @ f>s hpsto ] define
+"hprcli" [ regaddr @ f>s hprcl ] define
+
+( --- isg: increment reg, true while value stays negative --- )
+"hpisg" [ regaddr dup @ 1.0 f+ dup rot ! 0.0 f< ] define
+
+( --- statistics in registers 11-16, HP-41 layout --- )
+"cls" [
+  0.0 11 regaddr ! 0.0 12 regaddr ! 0.0 13 regaddr !
+  0.0 14 regaddr ! 0.0 15 regaddr ! 0.0 16 regaddr !
+] define
+
+"splus" [
+  11 hpst+
+  12 regaddr dup @ {xr} @ {xr} @ f* f+ swap !
+  13 regaddr dup @ {yr} @ f+ swap !
+  14 regaddr dup @ {yr} @ {yr} @ f* f+ swap !
+  15 regaddr dup @ {xr} @ {yr} @ f* f+ swap !
+  16 regaddr dup @ 1.0 f+ swap !
+  16 regaddr @ {xr} !
+] define
+
+"sminus" [
+  11 hpst-
+  12 regaddr dup @ {xr} @ {xr} @ f* f- swap !
+  13 regaddr dup @ {yr} @ f- swap !
+  14 regaddr dup @ {yr} @ {yr} @ f* f- swap !
+  15 regaddr dup @ {xr} @ {yr} @ f* f- swap !
+  16 regaddr dup @ 1.0 f- swap !
+  16 regaddr @ {xr} !
+] define
+
+"mean" [ 11 regaddr @ 16 regaddr @ f/ xn ] define
+
+"sdev" [
+  12 regaddr @
+  11 regaddr @ 11 regaddr @ f* 16 regaddr @ f/ f-
+  16 regaddr @ 1.0 f- f/ fsqrt xn
+] define
+
 ( --- display --- )
 "prx" [ {xr} @ f. cr ] define
 "prst" [ {tr} @ f. {zr} @ f. {yr} @ f. {xr} @ f. cr ] define
@@ -115,3 +163,70 @@
 ] define
 
 "rftest" [ "prog" runfile ] define
+
+( --- interactive calculator REPL: type FOCAL, numbers enter X --- )
+"lc@" [ {ln} @ 16 + + c@ ] define
+"arg2" [ {ln} @ len 6 = if 4 lc@ 48 - 10 * 5 lc@ 48 - + else 4 lc@ 48 - then ] define
+"sto?" [ {ln} @ len 4 > 0 lc@ 115 = and 1 lc@ 116 = and 2 lc@ 111 = and 3 lc@ 32 = and ] define
+"rcl?" [ {ln} @ len 4 > 0 lc@ 114 = and 1 lc@ 99 = and 2 lc@ 108 = and 3 lc@ 32 = and ] define
+"fix?" [ {ln} @ len 4 > 0 lc@ 102 = and 1 lc@ 105 = and 2 lc@ 120 = and 3 lc@ 32 = and ] define
+
+"xnum" [
+  app-depth {d0} !
+  {ln} @ eval
+  app-depth {d0} @ - 0 > if
+    dup 4294967296 < over -4294967296 > and if s>f then xn
+  then
+] define
+
+"xstep" [
+  0 {hd} !
+  {ln} @ "+" str= if hp+ 1 {hd} ! then
+  {ln} @ "-" str= if hp- 1 {hd} ! then
+  {ln} @ "*" str= if hp* 1 {hd} ! then
+  {ln} @ "/" str= if hp/ 1 {hd} ! then
+  {ln} @ "pow" str= if hppow 1 {hd} ! then
+  {ln} @ "chs" str= if hpchs 1 {hd} ! then
+  {ln} @ "abs" str= if hpabs 1 {hd} ! then
+  {ln} @ "sqrt" str= if hpsqrt 1 {hd} ! then
+  {ln} @ "sin" str= if hpsin 1 {hd} ! then
+  {ln} @ "cos" str= if hpcos 1 {hd} ! then
+  {ln} @ "tan" str= if hptan 1 {hd} ! then
+  {ln} @ "atan" str= if hpatan 1 {hd} ! then
+  {ln} @ "ln" str= if hpln 1 {hd} ! then
+  {ln} @ "log" str= if hplog 1 {hd} ! then
+  {ln} @ "exp" str= if hpexp 1 {hd} ! then
+  {ln} @ "1/x" str= if hpinv 1 {hd} ! then
+  {ln} @ "x^2" str= if hpsq 1 {hd} ! then
+  {ln} @ "enter" str= if enter 1 {hd} ! then
+  {ln} @ "swap" str= if xy 1 {hd} ! then
+  {ln} @ "xy" str= if xy 1 {hd} ! then
+  {ln} @ "rdn" str= if rdn 1 {hd} ! then
+  {ln} @ "rup" str= if rup 1 {hd} ! then
+  {ln} @ "clx" str= if clx 1 {hd} ! then
+  {ln} @ "clst" str= if clst 1 {hd} ! then
+  {ln} @ "clrg" str= if clrg 1 {hd} ! then
+  {ln} @ "lastx" str= if lastx 1 {hd} ! then
+  {ln} @ "prst" str= if prst 1 {hd} ! then
+  {ln} @ "mean" str= if mean 1 {hd} ! then
+  {ln} @ "sdev" str= if sdev 1 {hd} ! then
+  {ln} @ "splus" str= if splus 1 {hd} ! then
+  {ln} @ "sminus" str= if sminus 1 {hd} ! then
+  {ln} @ "cls" str= if cls 1 {hd} ! then
+  {ln} @ "cla" str= if cla 1 {hd} ! then
+  {ln} @ "aview" str= if aview 1 {hd} ! then
+  sto? if arg2 hpsto 1 {hd} ! then
+  rcl? if arg2 hprcl 1 {hd} ! then
+  fix? if arg2 fix 1 {hd} ! then
+  {hd} @ 0 = if xnum then
+] define
+
+"xrpn" [
+  "XRPN  (q quits; FOCAL commands; numbers enter X)" . cr
+  begin
+    "x: " . {xr} @ f. cr
+    read-line {ln} !
+    {ln} @ "q" str= not {ln} @ "off" str= not and while
+    xstep
+  repeat
+] define

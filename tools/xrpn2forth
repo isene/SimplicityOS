@@ -25,14 +25,18 @@ SIMPLE = {
     'swap': 'xy', 'xy': 'xy', 'x<>y': 'xy',
     'clx': 'clx', 'clear': 'clst', 'clst': 'clst', 'clrg': 'clrg',
     'lastx': 'lastx',
-    'prx': 'prx', 'aview': 'prx', 'prstack': 'prst',
+    'prx': 'prx', 'aview': 'aview', 'prstack': 'prst',
+    'cla': 'cla', 'aleng': 'aleng',
+    'mean': 'mean', 'sdev': 'sdev', 'cls': 'cls',
+    'splus': 'splus', 'sminus': 'sminus',
 }
 REG_OPS = {'sto': 'hpsto', 'rcl': 'hprcl', 'st+': 'hpst+',
            'st-': 'hpst-', 'st*': 'hpst*', 'st/': 'hpst/',
            'sf': 'hpsf', 'cf': 'hpcf'}
 PREDICATES = {'x=0?', 'x!=0?', 'x<0?', 'x>0?', 'x<=0?', 'x>=0?',
               'x=y?', 'x!=y?', 'x<y?', 'x>y?', 'x<=y?', 'x>=y?'}
-NUM_RE = re.compile(r'^-?\d+(\.\d+)?$')
+NUM_RE = re.compile(r'^-?\d+(\.\d+)?(e-?\d+)?$')
+STR_RE = re.compile(r'^"([^"]*)"$')
 LBL_RE = re.compile(r'^(lbl|gto|xeq|gsb)\s+"([^"]+)"$', re.I)
 
 
@@ -50,13 +54,25 @@ def xlate(line, in_loop_pred=False):
     """One FOCAL line to forth tokens. Returns (tokens, is_predicate)."""
     low = line.lower()
     if NUM_RE.match(low):
-        val = low if '.' in low else low + '.0'
+        val = low
+        if '.' not in val and 'e' not in val:
+            val += '.0'
         return f"{val} xn", False
+    m = STR_RE.match(line)
+    if m and not LBL_RE.match(low):
+        return f'"{m.group(1)}" aset', False
     if low in SIMPLE:
         return SIMPLE[low], False
     if low in PREDICATES:
         return 'hp' + low, True
     parts = low.split()
+    if len(parts) == 3 and parts[1] == 'ind':
+        op, arg = parts[0], parts[2]
+        if op == 'sto' and arg.isdigit():
+            return f"{int(arg)} hpstoi", False
+        if op == 'rcl' and arg.isdigit():
+            return f"{int(arg)} hprcli", False
+        die("unsupported indirect form", line)
     if len(parts) == 2:
         op, arg = parts
         if op in REG_OPS:
@@ -71,6 +87,10 @@ def xlate(line, in_loop_pred=False):
             if not arg.isdigit():
                 die("non-numeric register", line)
             return f"{int(arg)} hpdse", True
+        if op == 'isg':
+            if not arg.isdigit():
+                die("non-numeric register", line)
+            return f"{int(arg)} hpisg", True
     kind, name = label_of(low)
     if kind in ('gto', 'xeq', 'gsb'):
         return name, False

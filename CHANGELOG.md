@@ -1,5 +1,37 @@
 # Simplicity OS - Changelog
 
+## [0.9.0] - 2026-08-16 - Roadmap Complete: Resilience and the XRPN REPL
+
+The roadmap closes: every open kernel defect fixed, XRPN finished
+with an interactive calculator.
+
+### Kernel resilience
+- IDT with all 32 exception vectors: a CPU exception prints
+  "(exception N at RIP)" and recovers to a clean REPL instead of
+  triple-fault rebooting
+- Heap grows on demand: the page-fault handler maps 2MB pages up
+  to a 64MB ceiling (verified with a write at 19MB)
+- free is real: heap objects go to a first-fit free list that
+  allocate_object reuses (freed array reallocates at the same
+  address)
+- HLT idle: PIC remapped, keyboard IRQ wakes wait_key; QEMU idle
+  CPU at the prompt drops from 100% to 0.0%
+- Stack guards are app-aware via stack_floor (52 sites)
+- str= returns -1 like every other predicate
+- New kernel word read-line ( -- str ): echoed, editable line input
+  for interactive apps
+
+### XRPN complete
+- Type xrpn for an interactive HP-41 calculator: numbers lift into
+  X, FOCAL commands dispatch by name, sto NN / rcl NN / fix N take
+  arguments, q or off quits, X shown after every line
+- Alpha register: aset, aview, cla, aleng
+- Indirect addressing (sto ind / rcl ind), isg, statistics
+  (splus, sminus, mean, sdev, cls in registers 11-16)
+- EEX float literals: 1.5e10 and 2.5e-3 parse everywhere
+- Translator maps all the new commands
+- Not done: HP-41 RAW import (no test files; would be unverified)
+
 ## [0.8.0] - 2026-08-16 - Self-Hosted Programs: eval and runfile
 
 Stage 3 of the XRPN port: write and run programs on the OS itself.
