@@ -1,74 +1,48 @@
-( Space Invaders - Levels version )
-( Controls: h=left l=right x=fire q=quit )
-( Up to 12 aliens in 3 rows of 4 )
+( Space Invaders )
+( Controls: h/l or arrows move, x or space fires, q quits )
+( 18 aliens in 3 rows of 6, tracked as bits 0-17 of {alive} )
+( Alien index i: column = i mod 6, row = i / 6; row 0 is the top )
 
-( Ship )
-"do-erase-ship" [ 32 0 {px} @ 23 screen-char ] define
-"do-draw-ship" [ 94 10 {px} @ 23 screen-char ] define
+( --- helpers --- )
+"pow2" [ 1 swap begin dup 0 > while swap 2 * swap 1 - repeat drop ] define
+"absv" [ dup 0 < if 0 swap - then ] define
 
-( HUD )
-"show-score" [ 83 14 0 0 screen-char 99 14 1 0 screen-char 111 14 2 0 screen-char 114 14 3 0 screen-char 101 14 4 0 screen-char 58 14 5 0 screen-char {score} @ 48 + 15 7 0 screen-char ] define
-"show-level" [ 76 14 10 0 screen-char 118 14 11 0 screen-char 58 14 12 0 screen-char {level} @ 48 + 15 14 0 screen-char ] define
-"show-hud" [ show-score show-level ] define
+( Alien geometry: 6 columns spaced 6 apart, rows 2 apart )
+"ax" [ 6 mod 6 * {gx} @ + ] define
+"ay" [ 6 / 2 * {gy} @ + ] define
+"alive?" [ pow2 {alive} @ and ] define
 
-( Draw rows )
-"draw-r0" [
-  {alive} @ 1 and if 87 14 {gx} @ {gy} @ screen-char then
-  {alive} @ 2 and if 87 14 {gx} @ 8 + {gy} @ screen-char then
-  {alive} @ 4 and if 87 14 {gx} @ 16 + {gy} @ screen-char then
-  {alive} @ 8 and if 87 14 {gx} @ 24 + {gy} @ screen-char then
+( Row 0: V magenta 30pts, row 1: M cyan 20pts, row 2: W green 10pts )
+"aglyph" [ {r} ! 87 {r} @ 0 = if drop 86 then {r} @ 1 = if drop 77 then ] define
+"acolor" [ {r} ! 10 {r} @ 0 = if drop 13 then {r} @ 1 = if drop 11 then ] define
+
+( --- drawing --- )
+"draw-alien" [ {i} @ 6 / aglyph {i} @ 6 / acolor {i} @ ax {i} @ ay screen-char ] define
+"erase-alien" [ 32 0 {i} @ ax {i} @ ay screen-char ] define
+"draw-aliens" [ 0 {i} ! begin {i} @ 18 < while {i} @ alive? if draw-alien then {i} @ 1 + {i} ! repeat ] define
+"erase-aliens" [ 0 {i} ! begin {i} @ 18 < while {i} @ alive? if erase-alien then {i} @ 1 + {i} ! repeat ] define
+
+"draw-ship" [ 47 15 {px} @ 1 - 23 screen-char 94 15 {px} @ 23 screen-char 92 15 {px} @ 1 + 23 screen-char ] define
+"erase-ship" [ 32 0 {px} @ 1 - 23 screen-char 32 0 {px} @ 23 screen-char 32 0 {px} @ 1 + 23 screen-char ] define
+"draw-boom" [ 42 14 {px} @ 1 - 23 screen-char 42 14 {px} @ 23 screen-char 42 14 {px} @ 1 + 23 screen-char ] define
+
+"show-hud" [ 0 0 screen-set "Score " . {score} @ . "  Lives " . {lives} @ . "  Level " . {level} @ . ] define
+
+( --- alien movement: state 0 = horizontal, 1 = descend --- )
+"speed-set" [
+  {nalive} @ 4000 * 8000 +
+  {level} @ 1 - 6000 * - {speed} !
+  {speed} @ 10000 < if 10000 {speed} ! then
 ] define
 
-"draw-r1" [
-  {alive} @ 16 and if 77 13 {gx} @ {gy} @ 2 + screen-char then
-  {alive} @ 32 and if 77 13 {gx} @ 8 + {gy} @ 2 + screen-char then
-  {alive} @ 64 and if 77 13 {gx} @ 16 + {gy} @ 2 + screen-char then
-  {alive} @ 128 and if 77 13 {gx} @ 24 + {gy} @ 2 + screen-char then
-] define
-
-"draw-r2" [
-  {alive} @ 256 and if 86 12 {gx} @ {gy} @ 4 + screen-char then
-  {alive} @ 512 and if 86 12 {gx} @ 8 + {gy} @ 4 + screen-char then
-  {alive} @ 1024 and if 86 12 {gx} @ 16 + {gy} @ 4 + screen-char then
-  {alive} @ 2048 and if 86 12 {gx} @ 24 + {gy} @ 4 + screen-char then
-] define
-
-( Erase rows )
-"erase-r0" [
-  {alive} @ 1 and if 32 0 {gx} @ {gy} @ screen-char then
-  {alive} @ 2 and if 32 0 {gx} @ 8 + {gy} @ screen-char then
-  {alive} @ 4 and if 32 0 {gx} @ 16 + {gy} @ screen-char then
-  {alive} @ 8 and if 32 0 {gx} @ 24 + {gy} @ screen-char then
-] define
-
-"erase-r1" [
-  {alive} @ 16 and if 32 0 {gx} @ {gy} @ 2 + screen-char then
-  {alive} @ 32 and if 32 0 {gx} @ 8 + {gy} @ 2 + screen-char then
-  {alive} @ 64 and if 32 0 {gx} @ 16 + {gy} @ 2 + screen-char then
-  {alive} @ 128 and if 32 0 {gx} @ 24 + {gy} @ 2 + screen-char then
-] define
-
-"erase-r2" [
-  {alive} @ 256 and if 32 0 {gx} @ {gy} @ 4 + screen-char then
-  {alive} @ 512 and if 32 0 {gx} @ 8 + {gy} @ 4 + screen-char then
-  {alive} @ 1024 and if 32 0 {gx} @ 16 + {gy} @ 4 + screen-char then
-  {alive} @ 2048 and if 32 0 {gx} @ 24 + {gy} @ 4 + screen-char then
-] define
-
-"draw-aliens" [ draw-r0 draw-r1 draw-r2 ] define
-"erase-aliens" [ erase-r0 erase-r1 erase-r2 ] define
-
-( Movement state machine: state 0=horizontal, 1=descend )
-( Horizontal move - check if edge reached, set state=1 if so )
 "move-horiz" [
   erase-aliens
   {gx} @ {dir} @ + {gx} !
-  {gx} @ 54 > if 54 {gx} ! 1 {ms} ! then
+  {gx} @ 43 > if 43 {gx} ! 1 {ms} ! then
   {gx} @ 1 < if 1 {gx} ! 1 {ms} ! then
   draw-aliens
 ] define
 
-( Descend one row, reverse direction, resume horizontal )
 "move-descend" [
   erase-aliens
   {gy} @ 1 + {gy} !
@@ -77,140 +51,135 @@
   draw-aliens
 ] define
 
-( Bullet )
-"can-fire?" [ {k} @ 120 = {bf} @ 0 = and ] define
-"do-fire" [ {px} @ {bx} ! 21 {by} ! 1 {bf} ! 0 {bt} ! 124 15 {bx} @ {by} @ screen-char ] define
-"do-move-bullet" [ 32 0 {bx} @ {by} @ screen-char {by} @ 1 - {by} ! 124 15 {bx} @ {by} @ screen-char ] define
+( --- player bullet --- )
+"erase-bullet" [ 32 0 {bx} @ {by} @ screen-char ] define
+"do-fire" [ {px} @ {bx} ! 22 {by} ! 1 {bf} ! 124 14 {bx} @ {by} @ screen-char ] define
 
-( Hit detection - row 0 )
-"hit0?" [ {bx} @ {gx} @ = {by} @ {gy} @ = and {alive} @ 1 and and {bf} @ 1 = and ] define
-"hit1?" [ {bx} @ {gx} @ 8 + = {by} @ {gy} @ = and {alive} @ 2 and and {bf} @ 1 = and ] define
-"hit2?" [ {bx} @ {gx} @ 16 + = {by} @ {gy} @ = and {alive} @ 4 and and {bf} @ 1 = and ] define
-"hit3?" [ {bx} @ {gx} @ 24 + = {by} @ {gy} @ = and {alive} @ 8 and and {bf} @ 1 = and ] define
-( Hit detection - row 1 )
-"hit4?" [ {bx} @ {gx} @ = {by} @ {gy} @ 2 + = and {alive} @ 16 and and {bf} @ 1 = and ] define
-"hit5?" [ {bx} @ {gx} @ 8 + = {by} @ {gy} @ 2 + = and {alive} @ 32 and and {bf} @ 1 = and ] define
-"hit6?" [ {bx} @ {gx} @ 16 + = {by} @ {gy} @ 2 + = and {alive} @ 64 and and {bf} @ 1 = and ] define
-"hit7?" [ {bx} @ {gx} @ 24 + = {by} @ {gy} @ 2 + = and {alive} @ 128 and and {bf} @ 1 = and ] define
-( Hit detection - row 2 )
-"hit8?" [ {bx} @ {gx} @ = {by} @ {gy} @ 4 + = and {alive} @ 256 and and {bf} @ 1 = and ] define
-"hit9?" [ {bx} @ {gx} @ 8 + = {by} @ {gy} @ 4 + = and {alive} @ 512 and and {bf} @ 1 = and ] define
-"hit10?" [ {bx} @ {gx} @ 16 + = {by} @ {gy} @ 4 + = and {alive} @ 1024 and and {bf} @ 1 = and ] define
-"hit11?" [ {bx} @ {gx} @ 24 + = {by} @ {gy} @ 4 + = and {alive} @ 2048 and and {bf} @ 1 = and ] define
-
-( Kill helpers )
-"kill0" [ {alive} @ 1 xor {alive} ! ] define
-"kill1" [ {alive} @ 2 xor {alive} ! ] define
-"kill2" [ {alive} @ 4 xor {alive} ! ] define
-"kill3" [ {alive} @ 8 xor {alive} ! ] define
-"kill4" [ {alive} @ 16 xor {alive} ! ] define
-"kill5" [ {alive} @ 32 xor {alive} ! ] define
-"kill6" [ {alive} @ 64 xor {alive} ! ] define
-"kill7" [ {alive} @ 128 xor {alive} ! ] define
-"kill8" [ {alive} @ 256 xor {alive} ! ] define
-"kill9" [ {alive} @ 512 xor {alive} ! ] define
-"kill10" [ {alive} @ 1024 xor {alive} ! ] define
-"kill11" [ {alive} @ 2048 xor {alive} ! ] define
-
-"do-kill-common" [ 0 {bf} ! 32 0 {bx} @ {by} @ screen-char {score} @ 1 + {score} ! show-score ] define
-
-"check-hits-r01" [
-  hit0? if kill0 do-kill-common then
-  hit1? if kill1 do-kill-common then
-  hit2? if kill2 do-kill-common then
-  hit3? if kill3 do-kill-common then
-  hit4? if kill4 do-kill-common then
-  hit5? if kill5 do-kill-common then
-  hit6? if kill6 do-kill-common then
-  hit7? if kill7 do-kill-common then
+"do-kill" [
+  {hi} @ pow2 {alive} @ xor {alive} !
+  {nalive} @ 1 - {nalive} !
+  0 {bf} ! erase-bullet
+  32 0 {hi} @ ax {hi} @ ay screen-char
+  30 {hi} @ 6 / 10 * - {score} @ + {score} !
+  speed-set
+  show-hud
 ] define
 
-"check-hits-r2" [
-  hit8? if kill8 do-kill-common then
-  hit9? if kill9 do-kill-common then
-  hit10? if kill10 do-kill-common then
-  hit11? if kill11 do-kill-common then
+"try-kill" [
+  {hy} @ 2 / 6 * {hx} @ 6 / + {hi} !
+  {hi} @ alive? if do-kill then
 ] define
 
-"check-hits" [ check-hits-r01 check-hits-r2 ] define
+"check-hit" [
+  {bx} @ {gx} @ - {hx} !
+  {by} @ {gy} @ - {hy} !
+  {hx} @ 0 >= {hx} @ 30 <= and {hx} @ 6 mod 0 = and
+  {hy} @ 0 >= and {hy} @ 4 <= and {hy} @ 2 mod 0 = and
+  if try-kill then
+] define
 
-( Celebration )
+"move-bullet" [
+  erase-bullet
+  {by} @ 1 - {by} !
+  {by} @ 1 < if 0 {bf} ! else 124 14 {bx} @ {by} @ screen-char check-hit then
+] define
+
+"bullet-tick" [ {bf} @ 1 = if move-bullet then ] define
+
+( --- alien bomb: falls from below the grid, round-robin column --- )
+"next-bomber" [
+  18 {j} !
+  begin {j} @ 0 > while
+    {vi} @ 1 + 18 mod {vi} !
+    {j} @ 1 - {j} !
+    {vi} @ alive? if 0 {j} ! then
+  repeat
+] define
+
+"erase-bomb" [ 32 0 {vx} @ {vy} @ screen-char ] define
+"do-bomb" [ next-bomber {vi} @ ax {vx} ! {gy} @ 6 + {vy} ! 1 {vf} ! 33 12 {vx} @ {vy} @ screen-char ] define
+
+"ship-hit" [
+  {lives} @ 1 - {lives} !
+  0 {vf} ! 6 {vd} ! erase-bomb
+  draw-boom show-hud
+  0 begin 1 + dup 3000000 > until drop
+  erase-ship 40 {px} ! draw-ship
+  {lives} @ 1 < if 0 {run} ! then
+] define
+
+"check-ship" [ {vy} @ 23 = {vx} @ {px} @ - absv 2 < and if ship-hit then ] define
+
+"move-bomb" [
+  erase-bomb
+  {vy} @ 1 + {vy} !
+  {vy} @ 23 > if 0 {vf} ! 8 {vd} ! draw-ship else 33 12 {vx} @ {vy} @ screen-char check-ship then
+] define
+
+"maybe-bomb" [ {nalive} @ 0 > if do-bomb then ] define
+"bomb-wait" [ {vd} @ 0 > if {vd} @ 1 - {vd} ! else maybe-bomb then ] define
+"bomb-tick" [ {vf} @ 1 = if move-bomb then {vf} @ 0 = if bomb-wait then ] define
+
+( --- level flow --- )
 "celebrate" [
   screen-clear
-  76 10 35 10 screen-char
-  69 10 36 10 screen-char
-  86 10 37 10 screen-char
-  69 10 38 10 screen-char
-  76 10 39 10 screen-char
-  {level} @ 48 + 14 41 10 screen-char
-  33 10 42 10 screen-char
-  42 14 33 12 screen-char 42 14 37 12 screen-char
-  42 14 41 12 screen-char 42 14 45 12 screen-char
-  42 14 35 8 screen-char 42 14 39 8 screen-char 42 14 43 8 screen-char
-  0 begin 1 + dup 800000 > until drop
+  33 11 screen-set "Wave cleared!" .
+  0 begin 1 + dup 6000000 > until drop
   screen-clear
 ] define
 
-( Next level )
 "next-level" [
   {level} @ 1 + {level} !
-  {speed} @ 8000 - {speed} !
-  {speed} @ 5000 < if 5000 {speed} ! then
-  {level} @ 2 < if 255 {alive} ! then
-  {level} @ 1 > if 4095 {alive} ! then
-  15 {gx} !
-  3 {gy} !
-  1 {dir} !
-  0 {ms} !
-  0 {bf} !
+  262143 {alive} ! 18 {nalive} !
+  6 {gx} ! 2 {gy} ! 1 {dir} ! 0 {ms} !
+  0 {bf} ! 0 {vf} ! 8 {vd} !
+  speed-set
   celebrate
-  show-hud
-  do-draw-ship
-  draw-aliens
+  show-hud draw-ship draw-aliens
 ] define
 
-( Tick handler - avoids nested if/then in main loop )
-"do-tick" [ 0 {t} ! {ms} @ 0 = if move-horiz then {ms} @ 1 = if move-descend then ] define
+( --- input --- )
+"left?" [ {k} @ 104 = {k} @ key-left = or ] define
+"right?" [ {k} @ 108 = {k} @ key-right = or ] define
+"fire?" [ {k} @ 120 = {k} @ 32 = or {bf} @ 0 = and ] define
 
+"do-tick" [
+  {ms} @ 0 = if move-horiz then
+  {ms} @ 1 = if move-descend then
+  {bf} @ 1 = if check-hit then
+] define
+
+( --- main --- )
 "invaders" [
-  screen-clear
-  cursor-hide
-  40 {px} !
-  15 {gx} !
-  3 {gy} !
-  1 {dir} !
-  1 {run} !
-  0 {t} !
-  0 {bt} !
-  0 {bx} !
-  21 {by} !
-  0 {bf} !
-  0 {score} !
-  1 {level} !
-  30000 {speed} !
-  255 {alive} !
-  0 {ms} !
-
-  show-hud
-  do-draw-ship
-  draw-aliens
+  screen-clear cursor-hide
+  40 {px} ! 6 {gx} ! 2 {gy} ! 1 {dir} ! 0 {ms} !
+  262143 {alive} ! 18 {nalive} !
+  0 {score} ! 3 {lives} ! 1 {level} !
+  0 {bf} ! 0 {vf} ! 8 {vd} ! 0 {vi} !
+  0 {t} ! 0 {bt} ! 0 {vt} ! 1 {run} !
+  speed-set
+  show-hud draw-ship draw-aliens
 
   begin {run} @ while
     key? {k} !
     {k} @ 113 = if 0 {run} ! then
-    {k} @ 108 = if do-erase-ship {px} @ 1 + {px} ! do-draw-ship then
-    {k} @ 104 = if do-erase-ship {px} @ 1 - {px} ! do-draw-ship then
-    can-fire? if do-fire then
+    left? {px} @ 2 > and if erase-ship {px} @ 1 - {px} ! draw-ship then
+    right? {px} @ 77 < and if erase-ship {px} @ 1 + {px} ! draw-ship then
+    fire? if do-fire then
     {bf} @ 1 = if {bt} @ 1 + {bt} ! then
-    {bt} @ 6000 > if 0 {bt} ! do-move-bullet then
-    {by} @ 2 < if 0 {bf} ! 32 0 {bx} @ {by} @ screen-char then
-    check-hits
-    {alive} @ 0 = if next-level then
+    {bt} @ 3500 > if 0 {bt} ! bullet-tick then
+    {vt} @ 1 + {vt} !
+    {vt} @ 30000 > if 0 {vt} ! bomb-tick then
     {t} @ 1 + {t} !
-    {t} @ {speed} @ > if do-tick then
-    {gy} @ 19 > if 0 {run} ! then
+    {t} @ {speed} @ > if 0 {t} ! do-tick then
+    {nalive} @ 0 = if next-level then
+    {gy} @ 18 > if 0 {run} ! then
   repeat
-  cursor-show
+
   screen-clear
-  "Final score: " type {score} @ . cr
+  35 10 screen-set "GAME OVER" .
+  30 12 screen-set "Final score: " . {score} @ .
+  30 14 screen-set "Press any key" .
+  key drop
+  cursor-show screen-clear
 ] define
