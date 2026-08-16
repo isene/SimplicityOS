@@ -22,7 +22,7 @@ Stack effects use the notation `( before -- after )`:
 **Stack:** `( value addr -- )`
 **Description:** Store 64-bit value at address.
 ```forth
-> 42 [myvar] !    ( store 42 in myvar )
+> 42 {myvar} !    ( store 42 in myvar )
 ```
 
 ### *
@@ -61,8 +61,6 @@ Stack effects use the notation `( before -- after )`:
 42 ok
 > "Hello" .
 Hello ok
-> { 1 2 3 } .
-[1 2 3 ] ok
 ```
 
 ### .s
@@ -77,7 +75,7 @@ Hello ok
 ### /
 **Category:** Kernel
 **Stack:** `( a b -- a/b )`
-**Description:** Divide a by b (integer division).
+**Description:** Signed integer division. Division by zero yields 0.
 ```forth
 > 20 4 / .
 5 ok
@@ -162,7 +160,7 @@ Hello ok
 **Stack:** `( addr -- value )`
 **Description:** Fetch 64-bit value from address.
 ```forth
-> [myvar] @ .
+> {myvar} @ .
 42 ok
 ```
 
@@ -177,10 +175,9 @@ Hello ok
 ### ]
 **Category:** Kernel
 **Stack:** `( -- array )`
-**Description:** End array collection, push resulting array.
-```forth
-> { 1 2 3 }    ( same as [ 1 2 3 ] but for data )
-```
+**Description:** End array collection, push resulting array. Use `[ ... ]`
+for word bodies passed to `define`. For data arrays, use `array` and `put`
+(`{name}` is variable syntax, not an array literal).
 
 ### again
 **Category:** Kernel
@@ -195,7 +192,7 @@ Hello ok
 **Stack:** `( n -- addr )`
 **Description:** Allocate n bytes from heap, return address.
 ```forth
-> 512 allot [buffer] !
+> 512 allot {buffer} !
 ok
 ```
 
@@ -228,12 +225,21 @@ ok
 <3> 1 2 3 ok
 ```
 
+### array
+**Category:** Kernel
+**Stack:** `( n -- arr )`
+**Description:** Create array of n elements on the heap.
+```forth
+> 3 array {a} !
+```
+
 ### at
 **Category:** Kernel
 **Stack:** `( array index -- value )`
-**Description:** Get element at index from array (0-based).
+**Description:** Get element at index from array (0-based). Out-of-bounds
+index or non-array pushes "(bad array index)".
 ```forth
-> { 10 20 30 } 1 at .
+> {a} @ 1 at .
 20 ok
 ```
 
@@ -250,7 +256,7 @@ ok
 **Stack:** `( byte addr -- )`
 **Description:** Store single byte at address.
 ```forth
-> 65 [buf] @ c!    ( store 'A' )
+> 65 {buf} @ c!    ( store 'A' )
 ```
 
 ### c@
@@ -258,9 +264,19 @@ ok
 **Stack:** `( addr -- byte )`
 **Description:** Fetch single byte from address.
 ```forth
-> [buf] @ c@ .
+> {buf} @ c@ .
 65 ok
 ```
+
+### cursor-hide
+**Category:** Kernel
+**Stack:** `( -- )`
+**Description:** Disable the VGA text cursor (used by games).
+
+### cursor-show
+**Category:** Kernel
+**Stack:** `( -- )`
+**Description:** Re-enable the VGA text cursor.
 
 ### clstk
 **Category:** Kernel
@@ -297,7 +313,7 @@ ok
 **Stack:** `( sector addr -- )`
 **Description:** Read 512-byte sector from disk into memory at addr.
 ```forth
-> 100 [buf] @ disk-read
+> 100 {buf} @ disk-read
 ```
 
 ### disk-write
@@ -305,7 +321,7 @@ ok
 **Stack:** `( addr sector -- )`
 **Description:** Write 512 bytes from addr to disk sector.
 ```forth
-> [buf] @ 100 disk-write
+> {buf} @ 100 disk-write
 ```
 
 ### drop
@@ -383,10 +399,11 @@ yes ok
 
 ### info
 **Category:** Kernel
-**Stack:** `( -- )`
-**Description:** Display system information.
+**Stack:** `( name-string -- )`
+**Description:** Show stack effect and description for a word.
 ```forth
-> info
+> "dup" info
+( a -- a a ) Duplicate top ok
 ```
 
 ### key
@@ -401,8 +418,9 @@ yes ok
 
 ### key?
 **Category:** Kernel
-**Stack:** `( -- flag )`
-**Description:** Check if key is available (non-blocking).
+**Stack:** `( -- key|0 )`
+**Description:** Non-blocking key check. Returns the keycode if a key is
+available, 0 otherwise (not a boolean flag).
 ```forth
 > key? .
 0 ok    ( no key pressed )
@@ -425,8 +443,6 @@ yes ok
 ```forth
 > "Hello" len .
 5 ok
-> { 1 2 3 } len .
-3 ok
 ```
 
 ### load
@@ -440,7 +456,7 @@ yes ok
 ### mod
 **Category:** Kernel
 **Stack:** `( a b -- a%b )`
-**Description:** Modulo (remainder of a/b).
+**Description:** Signed modulo (remainder of a/b). Modulo by zero yields 0.
 ```forth
 > 17 5 mod .
 2 ok
@@ -448,11 +464,13 @@ yes ok
 
 ### not
 **Category:** Kernel
-**Stack:** `( x -- ~x )`
-**Description:** Bitwise NOT (ones complement).
+**Stack:** `( flag -- flag' )`
+**Description:** Logical NOT: 0 becomes -1, anything else becomes 0.
 ```forth
 > 0 not .
 -1 ok
+> 12 not .
+0 ok
 ```
 
 ### or
@@ -475,11 +493,12 @@ yes ok
 
 ### put
 **Category:** Kernel
-**Stack:** `( array index value -- array' )`
-**Description:** Set element at index in array, return modified array.
+**Stack:** `( value array index -- )`
+**Description:** Set element at index in array. Consumes all three;
+out-of-bounds index or non-array pushes "(bad array index)".
 ```forth
-> { 1 2 3 } 1 99 put .
-[1 99 3 ] ok
+> 99 {a} @ 1 put
+ok
 ```
 
 ### remove
@@ -548,7 +567,7 @@ yes ok
 **Stack:** `( array -- sorted-array )`
 **Description:** Sort array in ascending order.
 ```forth
-> { 3 1 4 1 5 } sort .
+> {a} @ sort .
 [1 1 3 4 5 ] ok
 ```
 
@@ -573,14 +592,13 @@ positive ok
 ### type
 **Category:** Kernel
 **Stack:** `( obj -- type-code )`
-**Description:** Get type code of object.
+**Description:** Get type code of object. Note: this consumes the object
+and replaces it with the code; it does NOT print (use `.` for that).
 ```forth
 > 42 type .
 0 ok        ( INT )
 > "hi" type .
 1 ok        ( STRING )
-> { } type .
-3 ok        ( ARRAY )
 ```
 
 ### type-name
@@ -614,7 +632,7 @@ point ok
 **Stack:** `( array type-code -- typed-array )`
 **Description:** Set type of array to user type.
 ```forth
-> { 10 20 } 4 type-set .
+> {a} @ 4 type-set .
 [point: 10 20 ] ok
 ```
 
@@ -704,7 +722,8 @@ square cube ... ok
 `emit` `cr` `key` `key?`
 
 ### Screen
-`screen-char` `screen-clear` `screen-scroll` `screen-set`
+`screen-char` `screen-clear` `screen-get` `screen-line-shift`
+`screen-scroll` `screen-set` `cursor-hide` `cursor-show`
 
 ### Disk
 `disk-read` `disk-write`
@@ -735,7 +754,9 @@ Simple "Hello World" demo app.
 ```
 
 ### invaders
-Space Invaders game demo.
+Space Invaders: 18 aliens in 3 rows, alien bombs, 3 lives, levels with
+increasing speed. Controls: h/l or arrows move, x or space fires, q quits.
+Loaded at boot; start with:
 ```forth
-> "invaders" load
+> invaders
 ```

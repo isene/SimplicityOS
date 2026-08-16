@@ -89,7 +89,9 @@ TYPE_USER_BASE = 4  (user-defined types start here)
 ```
 type-new                        ( -- 4 )
 "point" 4 type-name             ( )
-"point" [ swap , , 4 type-set ] define   ( x y -- point )
+"point" [ {p-y} ! {p-x} ! 2 array {p} !
+  {p-x} @ {p} @ 0 put  {p-y} @ {p} @ 1 put
+  {p} @ 4 type-set ] define     ( x y -- point )
 10 20 point .                   ( ) [point: 10 20 ]
 ```
 

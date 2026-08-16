@@ -1,5 +1,61 @@
 # Simplicity OS - Changelog
 
+## [0.4.0] - 2026-08-16 - UEFI Boot, Kernel Hardening, Space Invaders
+
+### UEFI Boot
+- New `boot/uefi.asm`: hand-built PE32+ EFI application, no toolchain
+  beyond NASM. Embeds kernel.bin and an 8x16 font, calls
+  ExitBootServices, programs VGA text mode 3 by direct register access
+  (Bochs-VBE disable, CRTC/sequencer/graphics/attribute tables, font
+  upload to plane 2, EGA DAC palette), builds identity-mapped page
+  tables and the kernel GDT, jumps to 0x10000.
+- The kernel binary is unchanged between BIOS and UEFI boot.
+- `make run-uefi` boots via OVMF; the ESP is served from build/esp
+  with QEMU's FAT passthrough (no image tools needed). Apps still
+  load from the IDE disk image.
+
+### Kernel fixes
+- Binary ops (+ - * / mod = <> < > <= >= and or xor) now guard
+  against stack underflow instead of corrupting kernel variables.
+- Division and modulo: signed (idiv), divide-by-zero returns 0
+  instead of triple-faulting, INT_MIN/-1 overflow guarded.
+- disk-read/disk-write no longer leak one stack cell per call
+  (editor saves used to overflow the stack).
+- at/put validate array type and bounds; errors push
+  "(bad array index)" instead of corrupting memory.
+- @ ! c@ c! reject addresses beyond the mapped 4MB.
+- type-name read the wrong stack slot; named types now register.
+- edit no longer clobbers TOS.
+- screen-scroll: negative or zero n no longer wipes memory.
+- PgDn no longer acts as backspace at the REPL.
+- Boot-time screen clears used wrong rep counts (kernel 4x, stage2 2x).
+- Disk layout de-conflicted: apps own sectors 200-399 (pack-apps.sh
+  now enforces this and the 32-entry directory), saved definitions
+  moved from sector 250 to 400, editor directory from 250 to 450,
+  editor files from 300 to 460. Previously `save`, the editor, and
+  packed apps overwrote each other.
+- Makefile: image depends on apps and packer; kernel size checked
+  against the sector-200 limit at build time.
+
+### Space Invaders rewritten
+- 18 aliens (3 rows x 6), per-row glyphs, colors and scores
+  (30/20/10), computed from a bit mask with loops instead of 36
+  copy-pasted per-alien words (file shrank while gaining features).
+- Alien bombs with round-robin source column, 3 lives, ship explosion,
+  wide ship (/^\), HUD with score/lives/level, wave-clear celebration,
+  game over screen. Speed scales with survivors and level.
+- Arrow keys work alongside h/l; space fires alongside x.
+
+### Cleanup
+- Fixed core.forth 2swap and within (both returned wrong results).
+- Corrected WORDS.md: key? returns keycode-or-0, put is
+  ( value array index -- ), variables are {name} not [name],
+  data arrays via array/put (no { 1 2 3 } literal), not is logical,
+  info takes a name string.
+- Removed dead files: kernel/forth.asm, boot/stage2 (stale binary),
+  boot/stage2-full.asm, apps/hello.fth, apps/ed.fth, apps/catalog.
+- Known remaining defects documented in docs/ROADMAP.md.
+
 ## [0.17] - 2025-11-28 - Built-in Editor
 
 ### New Feature - Mini Vim-like Editor

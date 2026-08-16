@@ -22,10 +22,15 @@ Everything is a WORD. Hardware is directly composable.
 ## Quick Start
 
 ```bash
-make        # Build the OS
-make run    # Run in QEMU (requires QEMU installed)
-make debug  # Run with GDB debugging
+make          # Build the OS
+make run      # Run in QEMU, BIOS boot (requires QEMU installed)
+make run-uefi # Run in QEMU, UEFI boot (requires OVMF firmware)
+make debug    # Run with GDB debugging
 ```
+
+The same kernel boots both ways. The UEFI loader (`boot/uefi.asm`) is a
+hand-built PE32+ application that embeds the kernel, exits boot services,
+programs VGA text mode directly (no BIOS), and jumps to it.
 
 ## Philosophy
 
@@ -78,16 +83,16 @@ ok
 
 ### Variables
 ```forth
-> 0 [counter] !
+> 0 {counter} !
 ok
 
-> [counter] @ .
+> {counter} @ .
 0 ok
 
-> 42 [counter] !
+> 42 {counter} !
 ok
 
-> [counter] @ .
+> {counter} @ .
 42 ok
 ```
 
@@ -113,19 +118,24 @@ ok
 
 ### Arrays and Types
 ```forth
-> { 10 20 30 }
+> 3 array {a} !
 ok
 
-> len .
-3 ok
+> 10 {a} @ 0 put  20 {a} @ 1 put  30 {a} @ 2 put
+ok
 
-> 1 at .
+> {a} @ 1 at .
 20 ok
 
-> type-new "point" swap type-name
+> type-new .
+4 ok
+
+> "point" 4 type-name
 ok
 
-> "point" [ { rot rot } 4 type-set ] define
+> "point" [ {p-y} ! {p-x} ! 2 array {p} !
+    {p-x} @ {p} @ 0 put  {p-y} @ {p} @ 1 put
+    {p} @ 4 type-set ] define
 ok
 
 > 100 200 point .
@@ -147,15 +157,24 @@ Launch the vim-style editor:
 
 ### Disk Operations
 ```forth
-> 512 allot [mybuf] !
+> 512 allot {mybuf} !
 ok
 
-> 100 [mybuf] @ disk-read    ( read sector 100 )
+> 100 {mybuf} @ disk-read    ( read sector 100 )
 ok
 
-> [mybuf] @ 100 disk-write   ( write to sector 100 )
+> {mybuf} @ 100 disk-write   ( write to sector 100 )
 ok
 ```
+
+### Space Invaders
+
+```forth
+> invaders
+```
+
+18 aliens in 3 rows, alien bombs, 3 lives, levels that speed up.
+`h`/`l` or arrows move, `x` or space fires, `q` quits.
 
 ## Word Categories
 
@@ -209,6 +228,8 @@ User Words (Apps)           <- Applications, user definitions
 - NASM (assembler)
 - QEMU (emulator)
 - GNU Make
+- For `make run-uefi`: OVMF firmware (`/usr/share/ovmf/OVMF.fd`) and a
+  PSF1 console font for the loader's embedded VGA font (optional)
 
 ## Documentation
 
