@@ -303,11 +303,41 @@ emit_char:
     push rbx
     mov rbx, [cursor]
     mov [rbx], al
-    mov byte [rbx+1], 0x0E
+    mov al, [text_attr]
+    mov [rbx+1], al
     add rbx, 2
     mov [cursor], rbx
+    call scroll_if_needed
     call update_hw_cursor
     pop rbx
+    pop rax
+    ret
+
+text_attr: db 0x0E              ; Current print color (color! sets it)
+
+; Scroll one line up whenever the cursor passes the last cell
+scroll_if_needed:
+    push rax
+    push rcx
+    push rsi
+    push rdi
+    cmp qword [cursor], 0xB8FA0
+    jb .sin_done
+    ; Copy lines 1-24 up to lines 0-23 (3840 bytes)
+    mov rsi, 0xB80A0
+    mov rdi, 0xB8000
+    mov rcx, 480
+    rep movsq
+    ; Blank line 24
+    mov rdi, 0xB8F00
+    mov rax, 0x0720072007200720
+    mov rcx, 20
+    rep stosq
+    sub qword [cursor], 160
+.sin_done:
+    pop rdi
+    pop rsi
+    pop rcx
     pop rax
     ret
 
@@ -901,49 +931,28 @@ scancode_shift_table:
 ; Print null-terminated string from RAX
 print_string:
     push rax
-    push rbx
     push rcx
-    mov rbx, [cursor]
     mov rcx, rax        ; Use RCX for string pointer
 .loop:
     mov al, [rcx]
     cmp al, 0           ; Explicit zero comparison
     je .done
-    mov [rbx], al
-    mov byte [rbx+1], 0x0E
-    add rbx, 2
+    call emit_char      ; Handles color and scrolling
     inc rcx
     jmp .loop
 .done:
-    mov [cursor], rbx
-    call update_hw_cursor
     pop rcx
-    pop rbx
     pop rax
     ret
 
 ; Print null-terminated string in gray
 print_string_gray:
-    push rax
     push rbx
-    push rcx
-    mov rbx, [cursor]
-    mov rcx, rax
-.loop:
-    mov al, [rcx]
-    cmp al, 0
-    je .done
-    mov [rbx], al
-    mov byte [rbx+1], 0x03      ; Dark cyan
-    add rbx, 2
-    inc rcx
-    jmp .loop
-.done:
-    mov [cursor], rbx
-    call update_hw_cursor
-    pop rcx
+    movzx rbx, byte [text_attr]
+    mov byte [text_attr], 0x03  ; Dark cyan
+    call print_string
+    mov [text_attr], bl
     pop rbx
-    pop rax
     ret
 
 ; REPL program: Jump to assembly REPL
@@ -1892,6 +1901,7 @@ newline:
     shl rax, 1
     add rax, 0xB8000
     mov [cursor], rax
+    call scroll_if_needed
     call update_hw_cursor
     pop rax
     ret
@@ -4214,6 +4224,20 @@ match_float_word:
     mov rax, word_read_line
     ret
 .mf_not_rl:
+    ; color! (6 chars)
+    cmp rcx, 6
+    jne .mf_not_col
+    cmp byte [rdi], 'c'
+    jne .mf_not_col
+    cmp byte [rdi+1], 'o'
+    jne .mf_not_col
+    cmp byte [rdi+2], 'l'
+    jne .mf_not_col
+    cmp byte [rdi+5], '!'
+    jne .mf_not_col
+    mov rax, word_color
+    ret
+.mf_not_col:
     cmp byte [rdi], 'f'
     jne .mf_no
     cmp rcx, 2
@@ -5216,6 +5240,19 @@ word_inspect:
 
 str_colon_ref: db '(colon)', 0
 str_builtin_ref: db '(built-in)', 0
+
+word_color:
+    ; color! ( attr -- ) set the print color for emit/print words
+    mov [text_attr], r14b
+    sub r15, 8
+    cmp r15, [stack_floor]
+    jl .col_empty
+    mov r14, [r15]
+    ret
+.col_empty:
+    mov r15, [stack_floor]
+    xor r14, r14
+    ret
 
 word_eval:
     ; eval ( str-or-addr -- ) interpret text as source code.

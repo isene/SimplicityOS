@@ -1,5 +1,17 @@
 # Simplicity OS - Changelog
 
+## [0.9.1] - 2026-08-16 - Screen Scrolling and the XRPN Dashboard
+
+- The screen scrolls: output past the last line shifts everything
+  up one line instead of vanishing into invisible video memory.
+  One scroll check in emit_char/newline covers every print path
+- New kernel word color! ( attr -- ) sets the print color;
+  print_string and print_number inherit it
+- xrpn is now a fixed dashboard at the top of the screen: T/Z/Y in
+  cyan, X in yellow, LASTX in magenta, Alpha in green, a separator,
+  the input line below, messages under that. The full stack is
+  visible after every keystroke
+
 ## [0.9.0] - 2026-08-16 - Roadmap Complete: Resilience and the XRPN REPL
 
 The roadmap closes: every open kernel defect fixed, XRPN finished

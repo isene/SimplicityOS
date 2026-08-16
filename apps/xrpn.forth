@@ -221,12 +221,30 @@
   {hd} @ 0 = if xnum then
 ] define
 
+( --- dashboard: full stack always visible at the top --- )
+"clrline" [ {cy} ! 0 {cx} ! begin {cx} @ 80 < while 32 0 {cx} @ {cy} @ screen-char {cx} @ 1 + {cx} ! repeat ] define
+"dline" [ {dy} ! {da} ! {dy} @ clrline 0 {dy} @ screen-set {da} @ color! . ] define
+
+"show-xrpn" [
+  "t: " 11 0 dline {tr} @ f.
+  "z: " 11 1 dline {zr} @ f.
+  "y: " 11 2 dline {yr} @ f.
+  "x: " 14 3 dline {xr} @ f.
+  "l: " 13 4 dline {lr} @ f.
+  "a: " 10 5 dline {hpa} @ 0 = not if {hpa} @ . then
+  0 {cx} ! begin {cx} @ 80 < while 45 8 {cx} @ 6 screen-char {cx} @ 1 + {cx} ! repeat
+] define
+
 "xrpn" [
-  "XRPN  (q quits; FOCAL commands; numbers enter X)" . cr
+  screen-clear
   begin
-    "x: " . {xr} @ f. cr
+    show-xrpn
+    7 clrline 8 clrline 9 clrline
+    0 7 screen-set 15 color! "> " .
     read-line {ln} !
     {ln} @ "q" str= not {ln} @ "off" str= not and while
+    0 8 screen-set
     xstep
   repeat
+  14 color! screen-clear
 ] define

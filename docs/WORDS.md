@@ -287,6 +287,15 @@ index or non-array pushes "(bad array index)".
 <0> ok
 ```
 
+### color!
+**Category:** Kernel
+**Stack:** `( attr -- )`
+**Description:** Set the print color (VGA attribute byte) for all
+emit/print output. 14 restores the yellow default.
+```forth
+> 12 color! "red text" . 14 color!
+```
+
 ### cr
 **Category:** Kernel
 **Stack:** `( -- )`
