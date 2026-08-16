@@ -199,12 +199,12 @@ ZBRANCH:
     mov rbx, r14            ; Save TOS for test
     ; Pop TOS using R14/R15 convention
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .zbranch_empty_prim  ; Use jl not jle - R15==data_stack means valid element at [R15]
     mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
     jmp .zbranch_test_prim
 .zbranch_empty_prim:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
 .zbranch_test_prim:
     test rbx, rbx
@@ -954,7 +954,7 @@ test_program:
 REPL:
     ; Initialize stacks (banner already shown during boot)
     ; R15 points one past last item, R14 holds TOS
-    mov r15, data_stack    ; Data stack base
+    mov r15, [stack_floor]    ; Data stack base
     mov r14, 0              ; Top of stack (TOS) - empty initially
     mov rbp, 0x90000        ; Return stack (away from page tables at 0x70000) (grows down)
 
@@ -975,7 +975,8 @@ REPL:
 ; Recovery entry: exceptions reset all interpreter state and land here
 repl_recover:
     mov rsp, 0x80000
-    mov r15, data_stack
+    mov qword [stack_floor], data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     mov rbp, 0x90000
     mov byte [compile_mode], 0
@@ -1673,35 +1674,54 @@ get_or_create_named_var:
 ; Allocate object (RCX = total size in bytes)
 ; Returns address in RAX
 allocate_object:
+    ; RCX = bytes wanted, RAX = address out. Freed blocks are reused
+    ; first-fit; otherwise bump-allocate (pages map on demand).
     push rbx
     push rcx
+    push rsi
+    push rdi
 
-    ; Get current heap position
+    ; Round request to 16
+    add rcx, 15
+    and rcx, ~15
+
+    ; First fit from the free list
+    mov rsi, free_list          ; RSI = address of link to current
+    mov rax, [free_list]
+.alloc_scan:
+    test rax, rax
+    jz .alloc_bump
+    cmp [rax], rcx              ; block size >= wanted?
+    jae .alloc_take
+    lea rsi, [rax+8]
+    mov rax, [rax+8]
+    jmp .alloc_scan
+.alloc_take:
+    mov rdi, [rax+8]            ; unlink
+    mov [rsi], rdi
+    jmp .alloc_out
+
+.alloc_bump:
     mov rax, [heap_ptr]
-
-    ; Align to 16 bytes
     add rax, 15
     and rax, ~15
-
-    ; Cap: heap exhausted returns the shared OOM string object
-    ; (pages beyond HEAP_END are mapped on demand by the #PF handler)
     lea rbx, [rax + rcx]
     cmp rbx, HEAP_MAX
     jae .alloc_oom
+    mov [heap_ptr], rbx
 
-    ; Update heap pointer
-    add rcx, rax
-    mov [heap_ptr], rcx
-
+.alloc_out:
+    pop rdi
+    pop rsi
     pop rcx
     pop rbx
     ret
 
 .alloc_oom:
     mov rax, [oom_object]
-    pop rcx
-    pop rbx
-    ret
+    jmp .alloc_out
+
+free_list: dq 0                 ; Freed blocks: [size:8][next:8]
 
 ; DOCOL - Marker for colon-defined words (not executable code)
 ; Why: Distinguishes user definitions from built-in words
@@ -1742,12 +1762,12 @@ DOCOL:
     mov rbx, r14            ; Get TOS
     ; Pop TOS using R14/R15 convention
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .zbranch_empty_docol ; Use jl not jle - R15==data_stack means valid element at [R15]
     mov r14, [r15]          ; After sub, old second-on-stack is at [r15]
     jmp .zbranch_test
 .zbranch_empty_docol:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
 .zbranch_test:
     test rbx, rbx
@@ -3528,14 +3548,14 @@ lookup_word:
 ; Word implementations for REPL (using R15 as data stack)
 ; Shared underflow handler for binary ops: clamp stack, result 0
 binop_underflow:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
 ; Pop second operand with underflow guard (jumps to handler if empty)
 %macro BINOP_POP 0
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl binop_underflow
 %endmacro
 
@@ -3998,12 +4018,12 @@ word_fix:
 .fix_hi_ok:
     mov [fix_digits], rax
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .fix_empty
     mov r14, [r15]
     ret
 .fix_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
@@ -4018,12 +4038,12 @@ word_fdot:
 
     ; Pop
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .fd_empty
     mov r14, [r15]
     jmp .fd_go
 .fd_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
 .fd_go:
 
@@ -4619,7 +4639,7 @@ word_dot:
     ; Convention: R14=TOS, [R15-8]=second, R15=next free slot
     ; After pop: depth decreases by 1, new TOS comes from stack
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .dot_empty           ; jl not jle: R15==data_stack means valid item at [R15]
     ; Still have items - load new TOS from memory
     mov r14, [r15]          ; After sub, [r15] is old second item = new TOS
@@ -4627,7 +4647,7 @@ word_dot:
 
 .dot_empty:
     ; Stack is now empty
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14            ; R14 undefined, set to 0
     ret
 
@@ -4806,18 +4826,18 @@ word_dup:
 word_drop:
     ; Drop TOS: decrement depth, load new TOS from memory
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .drop_empty              ; jl not jle: R15==data_stack means valid item at [R15]
     mov r14, [r15]              ; After sub, [r15] is old second = new TOS
     ret
 .drop_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
 word_clstk:
     ; Clear entire stack ( ... -- )
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
@@ -5004,21 +5024,21 @@ word_store:
     mov [rax], rbx          ; Store value at address
     ; Pop second argument, check for underflow
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .store_empty
     mov r14, [r15]          ; New TOS
     ret
 .store_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
 .store_invalid:
     ; Return error, clean stack (pop both args with underflow check)
     sub r15, 16             ; Pop both at once
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jge .store_inv_ok
-    mov r15, data_stack
+    mov r15, [stack_floor]
 .store_inv_ok:
     push rsi
     mov rsi, str_bad_addr
@@ -5057,19 +5077,19 @@ word_c_store:
     mov rbx, [r15]          ; Byte value
     mov [rax], bl           ; Store only low byte
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .c_store_empty
     mov r14, [r15]          ; New TOS
     ret
 .c_store_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 .c_store_invalid:
     sub r15, 16             ; Drop addr and byte
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jge .c_store_inv_ok
-    mov r15, data_stack
+    mov r15, [stack_floor]
 .c_store_inv_ok:
     push rsi
     mov rsi, str_bad_addr
@@ -5138,12 +5158,12 @@ word_eval:
 
     ; Pop with underflow clamp
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .ev_empty
     mov r14, [r15]
     jmp .ev_go
 .ev_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
 .ev_go:
 
@@ -5191,13 +5211,13 @@ word_execute:
 
     ; Pop with underflow check
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .exec_underflow
     mov r14, [r15]
     jmp .exec_validate
 
 .exec_underflow:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
 
 .exec_validate:
@@ -5331,22 +5351,22 @@ word_put:
 
     ; Load new TOS
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .put_empty
     mov r14, [r15]
     ret
 
 .put_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
 .put_invalid:
     ; Drop value slot too, push error string
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jge .put_inv_ok
-    mov r15, data_stack
+    mov r15, [stack_floor]
 .put_inv_ok:
     push rsi
     mov rsi, str_bad_index
@@ -5358,9 +5378,47 @@ word_put:
 str_bad_index: db '(bad array index)', 0
 
 word_free:
-    ; Free object from TOS (stub - just drops it)
+    ; free ( obj -- ) return a heap object's memory to the free list
+    mov rax, r14
     sub r15, 8
+    cmp r15, [stack_floor]
+    jl .free_uflow
     mov r14, [r15]
+    jmp .free_go
+.free_uflow:
+    mov r15, [stack_floor]
+    xor r14, r14
+.free_go:
+    ; Only live heap objects are freeable
+    cmp rax, HEAP_START
+    jb .free_done
+    cmp rax, [heap_ptr]
+    jae .free_done
+    push rbx
+    push rcx
+    mov rbx, [rax]              ; type tag
+    cmp rbx, TYPE_STRING
+    jne .free_not_str
+    mov rcx, [rax+8]
+    add rcx, 17                 ; header + text + null
+    jmp .free_have_size
+.free_not_str:
+    cmp rbx, TYPE_ARRAY
+    jb .free_skip               ; unknown layout: leak rather than guess
+    mov rcx, [rax+8]            ; arrays and user types: count
+    shl rcx, 3
+    add rcx, 16
+.free_have_size:
+    add rcx, 15
+    and rcx, ~15
+    mov [rax], rcx              ; block header: size
+    mov rbx, [free_list]
+    mov [rax+8], rbx            ; block header: next
+    mov [free_list], rax
+.free_skip:
+    pop rcx
+    pop rbx
+.free_done:
     ret
 
 word_len:
@@ -5398,12 +5456,18 @@ word_len:
 ; STR= - Compare two strings for equality ( str1 str2 -- flag )
 ; Returns 1 if equal, 0 if not equal
 word_str_eq:
-    ; Get str2 from TOS
-    mov rsi, r14
-    ; Get str1 from second
+    ; str= ( str1 str2 -- flag )  net one pop; flag replaces TOS
+    mov rsi, r14            ; str2 from TOS
     sub r15, 8
-    mov rdi, [r15]
-    mov r14, [r15-8]        ; New TOS
+    cmp r15, [stack_floor]
+    jl .str_eq_uflow
+    mov rdi, [r15]          ; str1 from second
+    jmp .str_eq_go
+.str_eq_uflow:
+    mov r15, [stack_floor]
+    xor r14, r14
+    ret
+.str_eq_go:
 
     ; Check if both are STRING type
     cmp qword [rdi], TYPE_STRING
@@ -5433,7 +5497,7 @@ word_str_eq:
     jnz .str_eq_loop
 
 .str_eq_true:
-    mov r14, 1
+    mov r14, -1             ; True, consistent with other predicates
     ret
 
 .str_eq_false:
@@ -5504,13 +5568,13 @@ word_type_name:
 .tn_invalid:
     ; Pop str, load new TOS
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .tn_empty
     mov r14, [r15]          ; Load new TOS from memory
     ret
 
 .tn_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
@@ -5673,12 +5737,12 @@ word_screen_set:
 
     ; Pop both, load new TOS
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .ss_empty            ; jl not jle: R15==data_stack means valid item at [R15]
     mov r14, [r15]
     ret
 .ss_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
@@ -5705,12 +5769,12 @@ word_screen_char:
 
     ; Pop all four, load new TOS
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .sc_empty            ; jl not jle: R15==data_stack means valid item at [R15]
     mov r14, [r15]
     ret
 .sc_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
@@ -5760,7 +5824,7 @@ word_screen_clear:
     ; No argument to pop - just return
     ret
 .scl_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
@@ -5827,12 +5891,12 @@ word_screen_scroll:
 .scroll_done:
     ; Pop n, load new TOS
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .scr_empty               ; jl not jle: R15==data_stack means valid item at [R15]
     mov r14, [r15]
     ret
 .scr_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
@@ -5883,12 +5947,12 @@ word_screen_line_shift:
 
     ; Pop both args, load new TOS
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .sls_empty               ; jl not jle: R15==data_stack means valid item at [R15]
     mov r14, [r15]
     ret
 .sls_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
     ret
 
@@ -6174,6 +6238,7 @@ word_app_enter:
     mov qword [app_active], 1
 
     ; Set up fresh app stack
+    mov qword [stack_floor], app_stack
     mov r15, app_stack
     xor r14, r14                ; Empty TOS
     ret
@@ -6187,6 +6252,7 @@ word_app_exit:
     je .not_in_app
 
     ; Restore saved stack state
+    mov qword [stack_floor], data_stack
     mov r14, [app_saved_tos]
     mov r15, [app_saved_sp]
     mov qword [app_active], 0
@@ -6274,12 +6340,12 @@ word_disk_read:
     sub r15, 8
     mov rax, [r15]          ; sector
     sub r15, 8              ; pop second item too
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .dr_uflow
     mov r14, [r15]          ; new TOS
     jmp .dr_go
 .dr_uflow:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
 .dr_go:
     call disk_read_direct
@@ -6293,12 +6359,12 @@ word_disk_write:
     sub r15, 8
     mov rsi, [r15]          ; addr
     sub r15, 8              ; pop second item too
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .dw_uflow
     mov r14, [r15]          ; new TOS
     jmp .dw_go
 .dw_uflow:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
 .dw_go:
     call disk_write_direct
@@ -7885,12 +7951,12 @@ word_define:
 
     ; Pop both array and name from stack
     sub r15, 16                 ; Remove two items
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .define_pop_empty
     mov r14, [r15]              ; New TOS
     jmp .define_popped
 .define_pop_empty:
-    mov r15, data_stack
+    mov r15, [stack_floor]
     xor r14, r14
 .define_popped:
 
@@ -8659,12 +8725,12 @@ exec_definition:
     lodsq                       ; Get offset into RAX
     mov rbx, r14                ; Save TOS for test
     sub r15, 8
-    cmp r15, data_stack
+    cmp r15, [stack_floor]
     jl .exec_zbranch_empty      ; Stack empty after pop
     mov r14, [r15]              ; Pop new TOS
     jmp .exec_zbranch_test
 .exec_zbranch_empty:
-    mov r15, data_stack         ; Reset stack pointer
+    mov r15, [stack_floor]         ; Reset stack pointer
     xor r14, r14                ; TOS = 0
 .exec_zbranch_test:
     test rbx, rbx               ; Test saved TOS (after pop to preserve flags)
@@ -9011,6 +9077,7 @@ app_stack: times 64 dq 0        ; Separate stack for apps (64 cells)
 app_saved_tos: dq 0             ; Saved TOS (R14) when entering app
 app_saved_sp: dq 0              ; Saved stack pointer (R15) when entering app
 app_active: dq 0                ; 1 if inside app context, 0 otherwise
+stack_floor: dq data_stack      ; Active stack base for guards (app-aware)
 app_loading: dq 1               ; 1 during boot app loading, 0 after (starts at 1)
 array_mode: db 0                ; 1 if inside array literal, 0 otherwise
 compile_mode: db 0              ; 0 = interpret, 1 = compile
