@@ -1,5 +1,11 @@
 # Simplicity OS - Changelog
 
+## [0.12.1] - 2026-08-17 - Snake Arrow Keys
+
+- Snake accepts arrows under QEMU's curses display, where they
+  arrive as ANSI ESC [ A/B/C/D characters instead of scancodes.
+  Same handling as invaders
+
 ## [0.12.0] - 2026-08-17 - Snake, and a Clean Boot
 
 - New app: snake (contributed). Growing snake, food, score line,

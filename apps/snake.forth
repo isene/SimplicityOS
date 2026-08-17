@@ -157,6 +157,11 @@
   {s-k} @ key-right = {s-dir} @ 2 <> and if 0 {s-dir} ! then
   {s-k} @ key-up    = {s-dir} @ 1 <> and if 3 {s-dir} ! then
   {s-k} @ key-down  = {s-dir} @ 3 <> and if 1 {s-dir} ! then
+  ( arrows arrive as ANSI ESC [ D/C/A/B under QEMU curses )
+  {s-k} @ 68 = {s-dir} @ 0 <> and if 2 {s-dir} ! then
+  {s-k} @ 67 = {s-dir} @ 2 <> and if 0 {s-dir} ! then
+  {s-k} @ 65 = {s-dir} @ 1 <> and if 3 {s-dir} ! then
+  {s-k} @ 66 = {s-dir} @ 3 <> and if 1 {s-dir} ! then
   {s-k} @ 113 = if 0 {s-run} ! then
 ] define
 
