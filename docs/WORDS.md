@@ -846,8 +846,9 @@ Simple "Hello World" demo app.
 ```
 
 ### invaders
-Space Invaders: 18 aliens in 3 rows, alien bombs, 3 lives, levels with
-increasing speed. Controls: h/l or arrows move, x or space fires, q quits.
+Space Invaders: 18 aliens in 3 rows, up to 3 concurrent bombs,
+4 erodable shields, 3 lives, levels with increasing speed.
+Controls: h/l or arrows move, x or space fires, q quits.
 Loaded at boot; start with:
 ```forth
 > invaders

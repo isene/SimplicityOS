@@ -2,10 +2,14 @@
 ( Controls: h/l or arrows move, x or space fires, q quits )
 ( 18 aliens in 3 rows of 6, tracked as bits 0-17 of {alive} )
 ( Alien index i: column = i mod 6, row = i / 6; row 0 is the top )
+( Up to 3 alien bombs in the air; 4 shields that shots erode )
 
 ( --- helpers --- )
 "pow2" [ 1 swap begin dup 0 > while swap 2 * swap 1 - repeat drop ] define
 "absv" [ dup 0 < if 0 swap - then ] define
+
+( read the character at x y straight from VGA memory )
+"cell@" [ 80 * + 2 * 753664 + c@ ] define
 
 ( Alien geometry: 6 columns spaced 6 apart, rows 2 apart )
 "ax" [ 6 mod 6 * {gx} @ + ] define
@@ -21,6 +25,15 @@
 "erase-alien" [ 32 0 {i} @ ax {i} @ ay screen-char ] define
 "draw-aliens" [ 0 {i} ! begin {i} @ 18 < while {i} @ alive? if draw-alien then {i} @ 1 + {i} ! repeat ] define
 "erase-aliens" [ 0 {i} ! begin {i} @ 18 < while {i} @ alive? if erase-alien then {i} @ 1 + {i} ! repeat ] define
+
+( Shields: 4 bunkers of # on rows 20-21; the screen is the state.
+  Bombs and bullets erode the cell they hit; aliens marching
+  through wipe cells as they pass )
+"draw-bunker" [ {sx} ! 0 {si} ! begin {si} @ 6 < while
+  35 10 {sx} @ {si} @ + 20 screen-char
+  35 10 {sx} @ {si} @ + 21 screen-char
+  {si} @ 1 + {si} ! repeat ] define
+"draw-shields" [ 10 draw-bunker 28 draw-bunker 46 draw-bunker 64 draw-bunker ] define
 
 "draw-ship" [ 47 15 {px} @ 1 - 23 screen-char 94 15 {px} @ 23 screen-char 92 15 {px} @ 1 + 23 screen-char ] define
 "erase-ship" [ 32 0 {px} @ 1 - 23 screen-char 32 0 {px} @ 23 screen-char 32 0 {px} @ 1 + 23 screen-char ] define
@@ -84,12 +97,18 @@
 "move-bullet" [
   erase-bullet
   {by} @ 1 - {by} !
-  {by} @ 1 < if 0 {bf} ! else 124 14 {bx} @ {by} @ screen-char check-hit then
+  {by} @ 1 < if 0 {bf} ! else
+    {bx} @ {by} @ cell@ 35 = if
+      32 0 {bx} @ {by} @ screen-char 0 {bf} !
+    else
+      124 14 {bx} @ {by} @ screen-char check-hit
+    then
+  then
 ] define
 
 "bullet-tick" [ {bf} @ 1 = if move-bullet then ] define
 
-( --- alien bomb: alternates aimed-at-ship and round-robin --- )
+( --- alien bombs: up to 3 in the air, aimed or round-robin --- )
 "next-bomber" [
   18 {j} !
   begin {j} @ 0 > while
@@ -115,32 +134,70 @@
 
 "pick-bomber" [
   {vn} @ 1 + {vn} !
-  {vn} @ 2 mod 0 = if aim-bomber else next-bomber then
+  {vn} @ 3 mod 0 = if aim-bomber else next-bomber then
 ] define
 
-"erase-bomb" [ 32 0 {vx} @ {vy} @ screen-char ] define
-"do-bomb" [ pick-bomber {vi} @ ax {vx} ! {gy} @ 6 + {vy} ! 1 {vf} ! 33 12 {vx} @ {vy} @ screen-char ] define
+( Bomb slot {j}: position and active flag live in 3-cell arrays )
+"vbx" [ {vxa} @ {j} @ at ] define
+"vby" [ {vya} @ {j} @ at ] define
+"vbf" [ {vfa} @ {j} @ at ] define
+"vb-draw" [ 33 12 vbx vby screen-char ] define
+"vb-erase" [ 32 0 vbx vby screen-char ] define
+"vb-off" [ 0 {vfa} @ {j} @ put ] define
 
+"clear-bombs" [ 0 {j} ! begin {j} @ 3 < while
+  vbf 1 = if vb-erase then vb-off {j} @ 1 + {j} ! repeat ] define
+
+( clear-bombs leaves {j} at 3, so a move loop that called us exits
+  early; harmless since every bomb is gone )
 "ship-hit" [
   {lives} @ 1 - {lives} !
-  0 {vf} ! 6 {vd} ! erase-bomb
+  clear-bombs
   draw-boom show-hud
   0 begin 1 + dup 3000000 > until drop
   erase-ship 40 {px} ! draw-ship
+  8 {vd} !
   {lives} @ 1 < if 0 {run} ! then
 ] define
 
-"check-ship" [ {vy} @ 23 = {vx} @ {px} @ - absv 2 < and if ship-hit then ] define
+"check-ship" [ vby 23 = vbx {px} @ - absv 2 < and if ship-hit then ] define
 
 "move-bomb" [
-  erase-bomb
-  {vy} @ 1 + {vy} !
-  {vy} @ 23 > if 0 {vf} ! 5 {vd} ! draw-ship else 33 12 {vx} @ {vy} @ screen-char check-ship then
+  vb-erase
+  vby 1 + {vya} @ {j} @ put
+  vby 23 > if vb-off draw-ship else
+    vbx vby cell@ 35 = if 32 0 vbx vby screen-char vb-off else
+      vb-draw check-ship
+    then
+  then
 ] define
 
-"maybe-bomb" [ {nalive} @ 0 > if do-bomb then ] define
-"bomb-wait" [ {vd} @ 0 > if {vd} @ 1 - {vd} ! else maybe-bomb then ] define
-"bomb-tick" [ {vf} @ 1 = if move-bomb then {vf} @ 0 = if bomb-wait then ] define
+"move-bombs" [ 0 {j} ! begin {j} @ 3 < while
+  vbf 1 = if move-bomb then {j} @ 1 + {j} ! repeat ] define
+
+"free-slot" [ 9 {fs} ! 0 {j} ! begin {j} @ 3 < while
+  vbf 0 = if {j} @ {fs} ! then {j} @ 1 + {j} ! repeat ] define
+
+"do-bomb" [
+  free-slot
+  {fs} @ 9 < if
+    pick-bomber
+    {fs} @ {j} !
+    {vi} @ ax {vxa} @ {j} @ put
+    {gy} @ 6 + {vya} @ {j} @ put
+    1 {vfa} @ {j} @ put
+    vb-draw
+  then
+] define
+
+( fire faster as aliens thin out )
+"spawn-tick" [
+  {vd} @ 0 > if {vd} @ 1 - {vd} ! else
+    {nalive} @ 0 > if do-bomb 3 {nalive} @ 3 / + {vd} ! then
+  then
+] define
+
+"bomb-tick" [ move-bombs spawn-tick ] define
 
 ( --- level flow --- )
 "celebrate" [
@@ -154,10 +211,11 @@
   {level} @ 1 + {level} !
   262143 {alive} ! 18 {nalive} !
   6 {gx} ! 2 {gy} ! 1 {dir} ! 0 {ms} !
-  0 {bf} ! 0 {vf} ! 8 {vd} !
+  0 {bf} ! 8 {vd} !
+  0 {vfa} @ 0 put 0 {vfa} @ 1 put 0 {vfa} @ 2 put
   speed-set
   celebrate
-  show-hud draw-ship draw-aliens
+  show-hud draw-shields draw-ship draw-aliens
 ] define
 
 ( --- input --- )
@@ -179,10 +237,12 @@
   40 {px} ! 6 {gx} ! 2 {gy} ! 1 {dir} ! 0 {ms} !
   262143 {alive} ! 18 {nalive} !
   0 {score} ! 3 {lives} ! 1 {level} !
-  0 {bf} ! 0 {vf} ! 8 {vd} ! 0 {vi} ! 0 {vn} !
+  0 {bf} ! 8 {vd} ! 0 {vi} ! 0 {vn} !
+  3 array {vxa} ! 3 array {vya} ! 3 array {vfa} !
+  0 {vfa} @ 0 put 0 {vfa} @ 1 put 0 {vfa} @ 2 put
   0 {t} ! 0 {bt} ! 0 {vt} ! 1 {run} !
   speed-set
-  show-hud draw-ship draw-aliens
+  show-hud draw-shields draw-ship draw-aliens
 
   begin {run} @ while
     key? {k} !

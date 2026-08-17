@@ -1,5 +1,19 @@
 # Simplicity OS - Changelog
 
+## [0.11.0] - 2026-08-17 - Invaders: Shields and Concurrent Bombs
+
+Closer to the 1978 original:
+
+- Up to 3 alien bombs in the air at once; firing continues while
+  the formation marches and descends
+- Every third bomb aims at the ship, the rest round-robin the
+  columns; fire rate rises as aliens thin out
+- Four shields that bombs and the player bullet erode one cell per
+  hit; aliens wipe shield cells as they march through them
+- Shield state lives in video memory itself, read back with c@
+  (new helper cell@); no shadow buffers
+- A hit on the ship clears all bombs and grants a short grace
+
 ## [0.10.0] - 2026-08-17 - Full XRPN Coverage and the Ultimate Alarm Clock
 
 All 274 XRPN commands traversed: 154 implemented, the rest skipped

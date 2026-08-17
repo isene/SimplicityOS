@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.10.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.11.0-brightgreen.svg)](CHANGELOG.md)
 
 **Bare-metal x86_64 operating system built on pure RPN principles.**
 
@@ -209,8 +209,9 @@ with the CPU halted between timer ticks.
 > invaders
 ```
 
-18 aliens in 3 rows, alien bombs, 3 lives, levels that speed up.
-`h`/`l` or arrows move, `x` or space fires, `q` quits.
+18 aliens in 3 rows, up to 3 bombs in the air, 4 shields that shots
+erode, 3 lives, levels that speed up. Aliens fire while marching and
+descending. `h`/`l` or arrows move, `x` or space fires, `q` quits.
 
 ## Word Categories
 
