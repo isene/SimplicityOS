@@ -226,9 +226,11 @@
 "fire?" [ {k} @ 120 = {k} @ 32 = or {k} @ 65 = or {k} @ key-up = or {bf} @ 0 = and ] define
 
 ( Repeats and buffered backlog are indistinguishable from a held )
-( key; a gap over 4 ticks starts a new episode, and one episode )
-( moves the ship at most 8 cells, so releases stop it )
-"epcheck" [ ticks {nk} ! {nk} @ {lastk} @ - 4 > if 0 {ep} ! then {nk} @ {lastk} ! ] define
+( key; a gap over 8 ticks of true quiet starts a new episode, and )
+( one episode moves the ship at most 8 cells, so releases stop it. )
+( 8 ticks, not less: QEMU curses stalls mid-flood for 200-400ms, )
+( and those false gaps must not re-arm the hop for stale keys )
+"epcheck" [ ticks {nk} ! {nk} @ {lastk} @ - 8 > if 0 {ep} ! then {nk} @ {lastk} ! ] define
 
 "do-tick" [
   {ms} @ 0 = if move-horiz then

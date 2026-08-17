@@ -1,5 +1,15 @@
 # Simplicity OS - Changelog
 
+## [0.12.6] - 2026-08-17 - Invaders: Hops Survive Stale Floods
+
+- A long held key queues seconds of stale repeats upstream in the
+  terminal and QEMU; they drain at ~55 per second. QEMU curses also
+  stalls 200-400ms mid-flood, and those false gaps re-armed the hop
+  for stale keys: the ship wandered and fresh taps were eaten
+- Re-arming now needs 8 ticks of true quiet (~450ms). A flood of
+  300 stale arrows moves the ship exactly one 8-cell hop; control
+  returns right after the backlog drains
+
 ## [0.12.5] - 2026-08-17 - Kernel: Atomic Keyboard Wait
 
 - 0.12.4 made the keyboard flakey: a byte landing between the
