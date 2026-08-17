@@ -623,15 +623,19 @@ idtr:
 wait_key:
     push rbx
 .wait:
-    ; Check if key available (port 0x64, bit 0)
+    ; Poll-then-halt must be atomic: a byte landing between the
+    ; check and the HLT fires IRQ1 at once, and no second edge
+    ; comes while the queue holds data. CLI parks that edge as
+    ; pending so sti;hlt wakes on it immediately.
+    cli
     in al, 0x64
     test al, 1
     jnz .have_byte
-    ; Idle until the keyboard interrupt wakes us (sti;hlt is atomic)
     sti
     hlt
     jmp .wait
 .have_byte:
+    sti
 
     ; Read scancode from port 0x60
     in al, 0x60

@@ -1,5 +1,16 @@
 # Simplicity OS - Changelog
 
+## [0.12.5] - 2026-08-17 - Kernel: Atomic Keyboard Wait
+
+- 0.12.4 made the keyboard flakey: a byte landing between the
+  status poll and the HLT fired its interrupt at once, and the CPU
+  then slept on data with no second edge coming. Input degraded to
+  timer-paced draining and QEMU's queue overflowed, dropping keys
+- wait_key now closes the window with CLI before the poll; a byte
+  arriving there stays a pending interrupt that wakes the HLT
+  immediately. Interrupts remain on everywhere else, so ticks keep
+  counting during games
+
 ## [0.12.4] - 2026-08-17 - Kernel: Interrupts Always On
 
 - The tick counter froze during busy loops: interrupts were only
