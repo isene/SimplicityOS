@@ -1,5 +1,20 @@
 # Simplicity OS - Changelog
 
+## [0.12.7] - 2026-08-17 - Fix Key Buffering at the Source
+
+- The stuck ship is gone for real. Fresh keys queue BEHIND stale
+  autorepeat in the terminal-to-QEMU pipe, so no game logic can see
+  them earlier; the only fix is stopping the backlog from forming
+- The launcher (tools/run-simplicity) now slows X autorepeat to
+  20 per second while QEMU runs and restores it on exit. That rate
+  stays under the ~55 per second QEMU curses input path, so the
+  queue is always empty: holding moves smoothly, releasing stops
+  the ship within one cell, taps always respond
+- Invaders drops the 8-cell hop budget from 0.12.3-0.12.6; with no
+  backlog the plain drain-and-rate-cap movement is correct
+- If you run make run directly, slow autorepeat yourself:
+  xset r rate 500 20 (restore with xset r rate 660 25)
+
 ## [0.12.6] - 2026-08-17 - Invaders: Hops Survive Stale Floods
 
 - A long held key queues seconds of stale repeats upstream in the
