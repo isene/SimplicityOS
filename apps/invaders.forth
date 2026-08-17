@@ -26,9 +26,9 @@
 "draw-aliens" [ 0 {i} ! begin {i} @ 18 < while {i} @ alive? if draw-alien then {i} @ 1 + {i} ! repeat ] define
 "erase-aliens" [ 0 {i} ! begin {i} @ 18 < while {i} @ alive? if erase-alien then {i} @ 1 + {i} ! repeat ] define
 
-( Shields: 4 bunkers of # on rows 20-21; the screen is the state.
-  Bombs and bullets erode the cell they hit; aliens marching
-  through wipe cells as they pass )
+( Shields: 4 bunkers of # on rows 20-21; the screen is the state )
+( Bombs and bullets erode the cell they hit; aliens marching )
+( through wipe cells as they pass )
 "draw-bunker" [ {sx} ! 0 {si} ! begin {si} @ 6 < while
   35 10 {sx} @ {si} @ + 20 screen-char
   35 10 {sx} @ {si} @ + 21 screen-char
@@ -148,8 +148,8 @@
 "clear-bombs" [ 0 {j} ! begin {j} @ 3 < while
   vbf 1 = if vb-erase then vb-off {j} @ 1 + {j} ! repeat ] define
 
-( clear-bombs leaves {j} at 3, so a move loop that called us exits
-  early; harmless since every bomb is gone )
+( clear-bombs leaves {j} at 3, so a move loop that called us )
+( exits early; harmless since every bomb is gone )
 "ship-hit" [
   {lives} @ 1 - {lives} !
   clear-bombs

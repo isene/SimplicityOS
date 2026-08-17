@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.11.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.12.0-brightgreen.svg)](CHANGELOG.md)
 
 **Bare-metal x86_64 operating system built on pure RPN principles.**
 
@@ -213,6 +213,15 @@ with the CPU halted between timer ticks.
 erode, 3 lives, levels that speed up. Aliens fire while marching and
 descending. `h`/`l` or arrows move, `x` or space fires, `q` quits.
 
+### Snake
+
+```forth
+> snake
+```
+
+A contributed game: steer with `h`/`j`/`k`/`l` or arrows, eat `*` to
+grow and speed up, `q` quits.
+
 ## Word Categories
 
 See [docs/WORDS.md](docs/WORDS.md) for complete reference.
@@ -224,7 +233,7 @@ Core primitives: `+ - * / mod dup drop swap . .s @ ! if then else begin while re
 Extended operations loaded at boot time.
 
 ### User Words (Apps)
-Applications like `editor`, `invaders`, `xrpn`, `uac`.
+Applications like `editor`, `invaders`, `snake`, `xrpn`, `uac`.
 
 ## Architecture
 

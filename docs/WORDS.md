@@ -854,6 +854,13 @@ Loaded at boot; start with:
 > invaders
 ```
 
+### snake
+Snake: steer with h/j/k/l or arrows, eat * to grow and speed up,
+q quits. Contributed game.
+```forth
+> snake
+```
+
 ### xrpn
 HP-41 calculator with a fixed stack dashboard. Type FOCAL commands;
 see [XRPN-COVERAGE.md](XRPN-COVERAGE.md) for the command set.

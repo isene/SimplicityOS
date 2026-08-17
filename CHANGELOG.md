@@ -1,5 +1,17 @@
 # Simplicity OS - Changelog
 
+## [0.12.0] - 2026-08-17 - Snake, and a Clean Boot
+
+- New app: snake (contributed). Growing snake, food, score line,
+  speedup on eating, 180-degree turn prevention, RNG seeded from
+  keypress timing. h/j/k/l or arrows steer, q quits
+- Boot is quiet again. xrpn's calculator dispatch referenced words
+  defined later in the file; define resolves at compile time, so
+  those entries compiled empty (typing time, date, tone and friends
+  did nothing). All words now defined before xstep uses them
+- Invaders comments are single-line; ( ) comments end at the line,
+  and the spill-over lines printed as unknown words at boot
+
 ## [0.11.0] - 2026-08-17 - Invaders: Shields and Concurrent Bombs
 
 Closer to the 1978 original:

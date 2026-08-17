@@ -330,6 +330,93 @@ rtc + + 1 + {rs2} !
 
 "rftest" [ "prog" runfile ] define
 
+( --- alpha extras --- )
+"ashf" [ alen0 {n1} ! {n1} @ 7 < if cla else
+  {n1} @ 6 - {n2} ! {n2} @ anew {na} !
+  0 {i4} ! begin {i4} @ {n2} @ < while
+    {hpa} @ 22 + {i4} @ + c@ {na} @ 16 + {i4} @ + c!
+    {i4} @ 1 + {i4} ! repeat
+  0 {na} @ 16 + {n2} @ + c!
+  {na} @ {hpa} ! then ] define
+
+"posa" [ 0 {p2} ! alen0 {n1} ! 0 {i4} !
+  begin {i4} @ {n1} @ < while
+    {hpa} @ 16 + {i4} @ + c@ {xr} @ f>s = {p2} @ 0 = and if {i4} @ 1 + {p2} ! then
+    {i4} @ 1 + {i4} ! repeat
+  {xr} @ {lr} ! {p2} @ s>f {xr} ! ] define
+
+"anum" [ 0 {i4} ! alen0 {n1} ! 0 {av} ! 0 {af} ! 0 {ac} ! 0 {am} !
+  begin {i4} @ {n1} @ < while
+    {hpa} @ 16 + {i4} @ + c@ {hc} !
+    {hc} @ 47 > {hc} @ 58 < and if
+      {am} @ 2 = if
+        {ac} @ 9 < if {af} @ 10 * {hc} @ 48 - + {af} ! {ac} @ 1 + {ac} ! then
+      else {av} @ 10 * {hc} @ 48 - + {av} ! 1 {am} ! then
+    then
+    {hc} @ 46 = {am} @ 1 = and if 2 {am} ! then
+    {hc} @ 47 > {hc} @ 58 < and not {hc} @ 46 = not and {am} @ 0 > and if {n1} @ {i4} ! then
+    {i4} @ 1 + {i4} ! repeat
+  {av} @ s>f
+  {ac} @ 0 > if {af} @ s>f begin {ac} @ 0 > while 10.0 f/ {ac} @ 1 - {ac} ! repeat f+ then
+  xn ] define
+
+( --- time: rtc-backed HP time words --- )
+"hr" [ {xr} @ {lr} ! {xr} @ f>s s>f {t1} ! {xr} @ {t1} @ f- 100.0 f* {t2} !
+  {t2} @ f>s s>f {t3} ! {t2} @ {t3} @ f- 100.0 f* {t4} !
+  {t1} @ {t3} @ 60.0 f/ f+ {t4} @ 3600.0 f/ f+ {xr} ! ] define
+"hms" [ {xr} @ {lr} ! {xr} @ f>s s>f {t1} ! {xr} @ {t1} @ f- 60.0 f* {t2} !
+  {t2} @ f>s s>f {t3} ! {t2} @ {t3} @ f- 60.0 f* {t4} !
+  {t1} @ {t3} @ 100.0 f/ f+ {t4} @ 10000.0 f/ f+ {xr} ! ] define
+"hms+" [ hr {xr} @ {t5} ! hpdrop hr {xr} @ {t5} @ f+ {xr} ! hms ] define
+"hms-" [ hr {xr} @ {t5} ! hpdrop hr {xr} @ {t5} @ f- {xr} ! hms ] define
+"time" [ rtc {t3} ! {t2} ! {t1} !
+  {t3} @ s>f {t2} @ s>f 100.0 f/ f+ {t1} @ s>f 10000.0 f/ f+ xn ] define
+"date" [ rtcd {t3} ! {t2} ! {t1} !
+  {t2} @ s>f {t1} @ s>f 100.0 f/ f+ {t3} @ s>f 1000000.0 f/ f+ xn ] define
+"dow" [ rtcd {t3} ! {t2} ! {t1} !
+  {t2} @ 3 < if {t2} @ 12 + {t2} ! {t3} @ 1 - {t3} ! then
+  {t1} @ {t2} @ 1 + 13 * 5 / + {t3} @ + {t3} @ 4 / + {t3} @ 100 / - {t3} @ 400 / + 7 mod
+  6 + 7 mod s>f xn ] define
+
+( --- sound: HP tone numbers 0-9 --- )
+"tone" [ {tn} ! 440 {tf} !
+  {tn} @ 0 = if 220 {tf} ! then
+  {tn} @ 1 = if 247 {tf} ! then
+  {tn} @ 2 = if 262 {tf} ! then
+  {tn} @ 3 = if 294 {tf} ! then
+  {tn} @ 4 = if 330 {tf} ! then
+  {tn} @ 5 = if 349 {tf} ! then
+  {tn} @ 6 = if 392 {tf} ! then
+  {tn} @ 7 = if 440 {tf} ! then
+  {tn} @ 8 = if 494 {tf} ! then
+  {tn} @ 9 = if 523 {tf} ! then
+  {tf} @ 4 beep ] define
+( aviewc: aview in VGA color X )
+"aviewc" [ {xr} @ f>s 15 and color! aview 15 color! ] define
+( tonexy: frequency X Hz for Y seconds )
+"tonexy" [ {xr} @ f>s {yr} @ 18.0 f* f>s beep ] define
+"pse" [ 18 {i5} ! begin {i5} @ 0 > while waittick {i5} @ 1 - {i5} ! repeat ] define
+
+( --- keys --- )
+"getkey" [ key s>f xn ] define
+"getkeyx" [ key? s>f xn ] define
+
+( --- display and misc --- )
+"view" [ regaddr @ f. cr ] define
+"cld" [ screen-clear ] define
+"adv" [ cr ] define
+"pra" [ aview ] define
+"prregs" [ 0 {i5} ! begin {i5} @ 100 < while
+  {i5} @ regaddr @ dup 0.0 f= not if {i5} @ . 58 emit 32 emit f. cr else drop then
+  {i5} @ 1 + {i5} ! repeat ] define
+"prflags" [ {hpflg} @ . cr ] define
+"geir" [ cr "Geir Isene <g@isene.com> https://isene.com" . cr
+  "Creator of the XRPN programming language." . cr ] define
+"xversion" [ "XRPN on Simplicity OS" . cr ] define
+"hpsize" [ drop ] define
+"sizeq" [ 100.0 xn ] define
+
+
 ( --- interactive calculator REPL: type FOCAL, numbers enter X --- )
 "lc@" [ {ln} @ 16 + + c@ ] define
 "arg-at" [ {ap} ! {ln} @ len {ap} @ 2 + = if {ap} @ lc@ 48 - 10 * {ap} @ 1 + lc@ 48 - + else {ap} @ lc@ 48 - then ] define
@@ -531,92 +618,6 @@ rtc + + 1 + {rs2} !
   fix? if arg2 fix 1 {hd} ! then
   {hd} @ 0 = if xnum then
 ] define
-
-( --- alpha extras --- )
-"ashf" [ alen0 {n1} ! {n1} @ 7 < if cla else
-  {n1} @ 6 - {n2} ! {n2} @ anew {na} !
-  0 {i4} ! begin {i4} @ {n2} @ < while
-    {hpa} @ 22 + {i4} @ + c@ {na} @ 16 + {i4} @ + c!
-    {i4} @ 1 + {i4} ! repeat
-  0 {na} @ 16 + {n2} @ + c!
-  {na} @ {hpa} ! then ] define
-
-"posa" [ 0 {p2} ! alen0 {n1} ! 0 {i4} !
-  begin {i4} @ {n1} @ < while
-    {hpa} @ 16 + {i4} @ + c@ {xr} @ f>s = {p2} @ 0 = and if {i4} @ 1 + {p2} ! then
-    {i4} @ 1 + {i4} ! repeat
-  {xr} @ {lr} ! {p2} @ s>f {xr} ! ] define
-
-"anum" [ 0 {i4} ! alen0 {n1} ! 0 {av} ! 0 {af} ! 0 {ac} ! 0 {am} !
-  begin {i4} @ {n1} @ < while
-    {hpa} @ 16 + {i4} @ + c@ {hc} !
-    {hc} @ 47 > {hc} @ 58 < and if
-      {am} @ 2 = if
-        {ac} @ 9 < if {af} @ 10 * {hc} @ 48 - + {af} ! {ac} @ 1 + {ac} ! then
-      else {av} @ 10 * {hc} @ 48 - + {av} ! 1 {am} ! then
-    then
-    {hc} @ 46 = {am} @ 1 = and if 2 {am} ! then
-    {hc} @ 47 > {hc} @ 58 < and not {hc} @ 46 = not and {am} @ 0 > and if {n1} @ {i4} ! then
-    {i4} @ 1 + {i4} ! repeat
-  {av} @ s>f
-  {ac} @ 0 > if {af} @ s>f begin {ac} @ 0 > while 10.0 f/ {ac} @ 1 - {ac} ! repeat f+ then
-  xn ] define
-
-( --- time: rtc-backed HP time words --- )
-"hr" [ {xr} @ {lr} ! {xr} @ f>s s>f {t1} ! {xr} @ {t1} @ f- 100.0 f* {t2} !
-  {t2} @ f>s s>f {t3} ! {t2} @ {t3} @ f- 100.0 f* {t4} !
-  {t1} @ {t3} @ 60.0 f/ f+ {t4} @ 3600.0 f/ f+ {xr} ! ] define
-"hms" [ {xr} @ {lr} ! {xr} @ f>s s>f {t1} ! {xr} @ {t1} @ f- 60.0 f* {t2} !
-  {t2} @ f>s s>f {t3} ! {t2} @ {t3} @ f- 60.0 f* {t4} !
-  {t1} @ {t3} @ 100.0 f/ f+ {t4} @ 10000.0 f/ f+ {xr} ! ] define
-"hms+" [ hr {xr} @ {t5} ! hpdrop hr {xr} @ {t5} @ f+ {xr} ! hms ] define
-"hms-" [ hr {xr} @ {t5} ! hpdrop hr {xr} @ {t5} @ f- {xr} ! hms ] define
-"time" [ rtc {t3} ! {t2} ! {t1} !
-  {t3} @ s>f {t2} @ s>f 100.0 f/ f+ {t1} @ s>f 10000.0 f/ f+ xn ] define
-"date" [ rtcd {t3} ! {t2} ! {t1} !
-  {t2} @ s>f {t1} @ s>f 100.0 f/ f+ {t3} @ s>f 1000000.0 f/ f+ xn ] define
-"dow" [ rtcd {t3} ! {t2} ! {t1} !
-  {t2} @ 3 < if {t2} @ 12 + {t2} ! {t3} @ 1 - {t3} ! then
-  {t1} @ {t2} @ 1 + 13 * 5 / + {t3} @ + {t3} @ 4 / + {t3} @ 100 / - {t3} @ 400 / + 7 mod
-  6 + 7 mod s>f xn ] define
-
-( --- sound: HP tone numbers 0-9 --- )
-"tone" [ {tn} ! 440 {tf} !
-  {tn} @ 0 = if 220 {tf} ! then
-  {tn} @ 1 = if 247 {tf} ! then
-  {tn} @ 2 = if 262 {tf} ! then
-  {tn} @ 3 = if 294 {tf} ! then
-  {tn} @ 4 = if 330 {tf} ! then
-  {tn} @ 5 = if 349 {tf} ! then
-  {tn} @ 6 = if 392 {tf} ! then
-  {tn} @ 7 = if 440 {tf} ! then
-  {tn} @ 8 = if 494 {tf} ! then
-  {tn} @ 9 = if 523 {tf} ! then
-  {tf} @ 4 beep ] define
-( aviewc: aview in VGA color X )
-"aviewc" [ {xr} @ f>s 15 and color! aview 15 color! ] define
-( tonexy: frequency X Hz for Y seconds )
-"tonexy" [ {xr} @ f>s {yr} @ 18.0 f* f>s beep ] define
-"pse" [ 18 {i5} ! begin {i5} @ 0 > while waittick {i5} @ 1 - {i5} ! repeat ] define
-
-( --- keys --- )
-"getkey" [ key s>f xn ] define
-"getkeyx" [ key? s>f xn ] define
-
-( --- display and misc --- )
-"view" [ regaddr @ f. cr ] define
-"cld" [ screen-clear ] define
-"adv" [ cr ] define
-"pra" [ aview ] define
-"prregs" [ 0 {i5} ! begin {i5} @ 100 < while
-  {i5} @ regaddr @ dup 0.0 f= not if {i5} @ . 58 emit 32 emit f. cr else drop then
-  {i5} @ 1 + {i5} ! repeat ] define
-"prflags" [ {hpflg} @ . cr ] define
-"geir" [ cr "Geir Isene <g@isene.com> https://isene.com" . cr
-  "Creator of the XRPN programming language." . cr ] define
-"xversion" [ "XRPN on Simplicity OS" . cr ] define
-"hpsize" [ drop ] define
-"sizeq" [ 100.0 xn ] define
 
 ( --- dashboard: full stack always visible at the top --- )
 "clrline" [ {cy} ! 0 {cx} ! begin {cx} @ 80 < while 32 0 {cx} @ {cy} @ screen-char {cx} @ 1 + {cx} ! repeat ] define
