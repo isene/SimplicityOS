@@ -10,9 +10,11 @@
 # The previous rate is restored when QEMU exits.
 cd "$(dirname "$(readlink -f "$0")")/.." || exit 1
 if [ -n "$DISPLAY" ] && command -v xset >/dev/null 2>&1; then
-    saved=$(xset q | awk '/auto repeat delay/ {print $4, $7}')
-    xset r rate 500 20
-    trap 'xset r rate $saved' EXIT INT TERM
+    saved=$(timeout 1 xset q 2>/dev/null | awk '/auto repeat delay/ {print $4, $7}')
+    if [ -n "$saved" ]; then
+        timeout 1 xset r rate 500 20
+        trap 'timeout 1 xset r rate $saved' EXIT INT TERM
+    fi
 fi
 if [ "$1" = "-u" ]; then
     make run-uefi
