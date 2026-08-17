@@ -225,6 +225,11 @@
 "right?" [ {k} @ 108 = {k} @ key-right = or {k} @ 67 = or ] define
 "fire?" [ {k} @ 120 = {k} @ 32 = or {k} @ 65 = or {k} @ key-up = or {bf} @ 0 = and ] define
 
+( Repeats and buffered backlog are indistinguishable from a held )
+( key; a gap over 4 ticks starts a new episode, and one episode )
+( moves the ship at most 8 cells, so releases stop it )
+"epcheck" [ ticks {nk} ! {nk} @ {lastk} @ - 4 > if 0 {ep} ! then {nk} @ {lastk} ! ] define
+
 "do-tick" [
   {ms} @ 0 = if move-horiz then
   {ms} @ 1 = if move-descend then
@@ -241,6 +246,7 @@
   3 array {vxa} ! 3 array {vya} ! 3 array {vfa} !
   0 {vfa} @ 0 put 0 {vfa} @ 1 put 0 {vfa} @ 2 put
   0 {t} ! 0 {bt} ! 0 {vt} ! 0 {mv} ! 0 {mt} ! 1 {run} !
+  0 {ep} ! ticks {lastk} !
   speed-set
   show-hud draw-shields draw-ship draw-aliens
 
@@ -249,15 +255,15 @@
     ( applied at a capped rate, so buffered repeats cannot queue )
     begin key? {k} ! {k} @ 0 = not while
       {k} @ 113 = if 0 {run} ! then
-      left? if 1 {mv} ! then
-      right? if 2 {mv} ! then
+      left? if epcheck 1 {mv} ! then
+      right? if epcheck 2 {mv} ! then
       fire? if do-fire then
     repeat
     {mt} @ 0 > if {mt} @ 1 - {mt} ! then
-    {mv} @ 1 = {mt} @ 0 = and if 0 {mv} !
-      {px} @ 2 > if erase-ship {px} @ 1 - {px} ! draw-ship then 16000 {mt} ! then
-    {mv} @ 2 = {mt} @ 0 = and if 0 {mv} !
-      {px} @ 77 < if erase-ship {px} @ 1 + {px} ! draw-ship then 16000 {mt} ! then
+    {mv} @ 1 = {mt} @ 0 = and if 0 {mv} ! {ep} @ 8 < if {ep} @ 1 + {ep} !
+      {px} @ 2 > if erase-ship {px} @ 1 - {px} ! draw-ship then 16000 {mt} ! then then
+    {mv} @ 2 = {mt} @ 0 = and if 0 {mv} ! {ep} @ 8 < if {ep} @ 1 + {ep} !
+      {px} @ 77 < if erase-ship {px} @ 1 + {px} ! draw-ship then 16000 {mt} ! then then
     {bf} @ 1 = if {bt} @ 1 + {bt} ! then
     {bt} @ 3500 > if 0 {bt} ! bullet-tick then
     {vt} @ 1 + {vt} !

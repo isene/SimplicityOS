@@ -1,5 +1,16 @@
 # Simplicity OS - Changelog
 
+## [0.12.3] - 2026-08-17 - Invaders: Bounded Movement Hops
+
+- A held movement key moves the ship at most 8 cells, then stops
+  until the key is released for a quarter second and pressed again.
+  Taps still move exactly 1 cell
+- Reason: the terminal delivers no key releases, so a held key and
+  a buffered backlog of repeats look identical to the game. Only a
+  bounded hop guarantees the ship stops where intended
+- Verified: a 1.2s hold at 50 repeats per second moves 8 cells and
+  stops at release with zero drift
+
 ## [0.12.2] - 2026-08-17 - Invaders: No More Key Buffering
 
 - Holding a movement key no longer carries the ship past the
