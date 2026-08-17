@@ -1,5 +1,17 @@
 # Simplicity OS - Changelog
 
+## [0.12.4] - 2026-08-17 - Kernel: Interrupts Always On
+
+- The tick counter froze during busy loops: interrupts were only
+  enabled inside the HLT windows of wait_key, waittick and beep.
+  That left the invaders ship permanently stuck after its first
+  8-cell hop, since hop re-arming compares tick timestamps
+- Interrupts are now the resting state: enabled after boot and
+  after exception recovery; the HLT windows no longer disable them.
+  The handlers only count ticks and acknowledge, and the keyboard
+  stays polled, so nothing else changes
+- `ticks` is now correct everywhere, not only at the prompt
+
 ## [0.12.3] - 2026-08-17 - Invaders: Bounded Movement Hops
 
 - A held movement key moves the ship at most 8 cells, then stops

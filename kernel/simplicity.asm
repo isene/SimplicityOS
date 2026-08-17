@@ -42,6 +42,9 @@ long_mode_64:
 
     ; Interrupts: IDT with exception recovery, PIC remap, keyboard IRQ
     call init_interrupts
+    ; Interrupts stay enabled from here on: the tick counter must
+    ; advance during busy loops, not only inside HLT windows
+    sti
 
     ; Clear screen in 64-bit mode (2000 cells = 500 qwords)
     mov rdi, 0xB8000
@@ -627,7 +630,6 @@ wait_key:
     ; Idle until the keyboard interrupt wakes us (sti;hlt is atomic)
     sti
     hlt
-    cli
     jmp .wait
 .have_byte:
 
@@ -1009,6 +1011,7 @@ repl_recover:
     mov byte [ctl_items], 0
     mov qword [app_active], 0
     fninit
+    sti                         ; exception entry cleared IF
 
 repl_main:
 .main_loop:
@@ -5368,7 +5371,6 @@ word_waittick:
 .wt_loop:
     sti
     hlt
-    cli
     cmp rax, [tick_count]
     je .wt_loop
     pop rax
@@ -5415,7 +5417,6 @@ word_beep:
 .bp_tick:
     sti
     hlt
-    cli
     cmp rax, [tick_count]
     je .bp_tick
     dec rcx
