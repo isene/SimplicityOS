@@ -1,5 +1,15 @@
 # Simplicity OS - Changelog
 
+## [0.12.2] - 2026-08-17 - Invaders: No More Key Buffering
+
+- Holding a movement key no longer carries the ship past the
+  release point. The loop drains every pending key each pass,
+  collapses movement into one intent, and applies it at a capped
+  rate (about 20 cells per second)
+- Measured under QEMU curses: a burst of 20 buffered arrows moved
+  the ship 8 cells and stopped; a held key stops within 1 cell of
+  release; a tap moves exactly 1 cell
+
 ## [0.12.1] - 2026-08-17 - Snake Arrow Keys
 
 - Snake accepts arrows under QEMU's curses display, where they

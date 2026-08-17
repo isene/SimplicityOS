@@ -240,16 +240,24 @@
   0 {bf} ! 8 {vd} ! 0 {vi} ! 0 {vn} !
   3 array {vxa} ! 3 array {vya} ! 3 array {vfa} !
   0 {vfa} @ 0 put 0 {vfa} @ 1 put 0 {vfa} @ 2 put
-  0 {t} ! 0 {bt} ! 0 {vt} ! 1 {run} !
+  0 {t} ! 0 {bt} ! 0 {vt} ! 0 {mv} ! 0 {mt} ! 1 {run} !
   speed-set
   show-hud draw-shields draw-ship draw-aliens
 
   begin {run} @ while
-    key? {k} !
-    {k} @ 113 = if 0 {run} ! then
-    left? {px} @ 2 > and if erase-ship {px} @ 1 - {px} ! draw-ship then
-    right? {px} @ 77 < and if erase-ship {px} @ 1 + {px} ! draw-ship then
-    fire? if do-fire then
+    ( drain all pending keys; movement collapses to one intent, )
+    ( applied at a capped rate, so buffered repeats cannot queue )
+    begin key? {k} ! {k} @ 0 = not while
+      {k} @ 113 = if 0 {run} ! then
+      left? if 1 {mv} ! then
+      right? if 2 {mv} ! then
+      fire? if do-fire then
+    repeat
+    {mt} @ 0 > if {mt} @ 1 - {mt} ! then
+    {mv} @ 1 = {mt} @ 0 = and if 0 {mv} !
+      {px} @ 2 > if erase-ship {px} @ 1 - {px} ! draw-ship then 16000 {mt} ! then
+    {mv} @ 2 = {mt} @ 0 = and if 0 {mv} !
+      {px} @ 77 < if erase-ship {px} @ 1 + {px} ! draw-ship then 16000 {mt} ! then
     {bf} @ 1 = if {bt} @ 1 + {bt} ! then
     {bt} @ 3500 > if 0 {bt} ! bullet-tick then
     {vt} @ 1 + {vt} !
