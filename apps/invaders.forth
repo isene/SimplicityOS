@@ -156,7 +156,7 @@
   draw-boom show-hud
   0 begin 1 + dup 3000000 > until drop
   erase-ship 40 {px} ! draw-ship
-  8 {vd} !
+  0 {vel} ! 8 {vd} !
   {lives} @ 1 < if 0 {run} ! then
 ] define
 
@@ -225,10 +225,10 @@
 "right?" [ {k} @ 108 = {k} @ key-right = or {k} @ 67 = or ] define
 "fire?" [ {k} @ 120 = {k} @ 32 = or {k} @ 65 = or {k} @ key-up = or {bf} @ 0 = and ] define
 
-( Movement: drain every pending key, collapse to one intent, )
-( apply at ~40 cells/s max. The launcher slows X autorepeat to )
-( 20/s so QEMU's input path never queues; releasing a held key )
-( then stops the ship within one cell )
+( Movement is glide: tap left/right to start moving, tap the )
+( opposite direction to stop, tap it again to reverse. Holding )
+( is never needed, so autorepeat cannot queue stale keys; same- )
+( direction repeats are no-ops )
 
 "do-tick" [
   {ms} @ 0 = if move-horiz then
@@ -245,7 +245,7 @@
   0 {bf} ! 8 {vd} ! 0 {vi} ! 0 {vn} !
   3 array {vxa} ! 3 array {vya} ! 3 array {vfa} !
   0 {vfa} @ 0 put 0 {vfa} @ 1 put 0 {vfa} @ 2 put
-  0 {t} ! 0 {bt} ! 0 {vt} ! 0 {mv} ! 0 {mt} ! 1 {run} !
+  0 {t} ! 0 {bt} ! 0 {vt} ! 0 {vel} ! 0 {mt} ! 1 {run} !
   speed-set
   show-hud draw-shields draw-ship draw-aliens
 
@@ -254,15 +254,17 @@
     ( applied at a capped rate, so buffered repeats cannot queue )
     begin key? {k} ! {k} @ 0 = not while
       {k} @ 113 = if 0 {run} ! then
-      left? if 1 {mv} ! then
-      right? if 2 {mv} ! then
+      left? if {vel} @ 1 = if 0 {vel} ! else -1 {vel} ! then then
+      right? if {vel} @ -1 = if 0 {vel} ! else 1 {vel} ! then then
       fire? if do-fire then
     repeat
     {mt} @ 0 > if {mt} @ 1 - {mt} ! then
-    {mv} @ 1 = {mt} @ 0 = and if 0 {mv} !
-      {px} @ 2 > if erase-ship {px} @ 1 - {px} ! draw-ship then 16000 {mt} ! then
-    {mv} @ 2 = {mt} @ 0 = and if 0 {mv} !
-      {px} @ 77 < if erase-ship {px} @ 1 + {px} ! draw-ship then 16000 {mt} ! then
+    {vel} @ -1 = {mt} @ 0 = and if
+      {px} @ 2 > if erase-ship {px} @ 1 - {px} ! draw-ship else 0 {vel} ! then
+      20000 {mt} ! then
+    {vel} @ 1 = {mt} @ 0 = and if
+      {px} @ 77 < if erase-ship {px} @ 1 + {px} ! draw-ship else 0 {vel} ! then
+      20000 {mt} ! then
     {bf} @ 1 = if {bt} @ 1 + {bt} ! then
     {bt} @ 3500 > if 0 {bt} ! bullet-tick then
     {vt} @ 1 + {vt} !

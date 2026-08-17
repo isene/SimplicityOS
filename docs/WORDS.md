@@ -848,7 +848,8 @@ Simple "Hello World" demo app.
 ### invaders
 Space Invaders: 18 aliens in 3 rows, up to 3 concurrent bombs,
 4 erodable shields, 3 lives, levels with increasing speed.
-Controls: h/l or arrows move, x or space fires, q quits.
+Controls: tap h/l or arrows to glide, tap the opposite direction
+to stop, x or space fires, q quits.
 Loaded at boot; start with:
 ```forth
 > invaders

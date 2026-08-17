@@ -1,5 +1,16 @@
 # Simplicity OS - Changelog
 
+## [0.13.0] - 2026-08-17 - Invaders: Glide Controls
+
+- The ship now glides: tap left or right to start moving, tap the
+  opposite direction to stop, tap it again to reverse. It parks at
+  the walls
+- Holding a key is never needed, so autorepeat cannot queue stale
+  input on any display stack; repeats of the current direction are
+  no-ops. This ends the key-buffering saga for good
+- The launcher's xset autorepeat guard from 0.12.7 is removed; it
+  did not work on all display stacks and glide makes it pointless
+
 ## [0.12.7] - 2026-08-17 - Fix Key Buffering at the Source
 
 - The stuck ship is gone for real. Fresh keys queue BEHIND stale

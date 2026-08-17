@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Public%20Domain-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-x86__64-green.svg)](https://en.wikipedia.org/wiki/X86-64)
 [![Language](https://img.shields.io/badge/language-Assembly-orange.svg)](https://www.nasm.us/)
-[![Version](https://img.shields.io/badge/version-0.12.7-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.13.0-brightgreen.svg)](CHANGELOG.md)
 
 **Bare-metal x86_64 operating system built on pure RPN principles.**
 
@@ -211,7 +211,9 @@ with the CPU halted between timer ticks.
 
 18 aliens in 3 rows, up to 3 bombs in the air, 4 shields that shots
 erode, 3 lives, levels that speed up. Aliens fire while marching and
-descending. `h`/`l` or arrows move, `x` or space fires, `q` quits.
+descending. The ship glides: tap `h`/`l` or an arrow to start
+moving, tap the opposite to stop, again to reverse. `x` or space
+fires, `q` quits.
 
 ### Snake
 
